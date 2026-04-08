@@ -30,9 +30,16 @@ class Settings(BaseSettings):
     telegram_chat_id: str | None = None
     telegram_chat_ids: list[str] = Field(default_factory=list)
     telegram_min_spread_percent: float = 0.5
+    telegram_min_confidence_score: float = 0.55
+    telegram_min_combined_oi_usd: float = 1_000_000
+    telegram_max_staleness_seconds: int = 45
     telegram_top_n: int = 5
     telegram_cooldown_minutes: int = 30
     telegram_poll_interval_seconds: int = 8
+    retention_prune_interval_minutes: int = 30
+    funding_snapshot_retention_hours: int = 72
+    opportunity_history_retention_days: int = 30
+    telegram_alert_state_retention_days: int = 90
     database_path: str = "data/arbradar.db"
 
     @property

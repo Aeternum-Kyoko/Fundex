@@ -127,6 +127,12 @@ export function OpportunityInspector({
             <span className="subtle">Mark gap</span>
             <strong>{opportunity.price_dislocation_percent ? formatPct(opportunity.price_dislocation_percent, 3) : "n/a"}</strong>
           </div>
+          <div className="metric-card">
+            <span className="subtle">Data age</span>
+            <strong>
+              {typeof opportunity.max_leg_age_seconds === "number" ? `${Math.round(opportunity.max_leg_age_seconds)}s` : "n/a"}
+            </strong>
+          </div>
         </div>
 
         <div className="overview-grid">

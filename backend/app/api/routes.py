@@ -7,9 +7,10 @@ from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
 from app.models.execution import ExecutionPlanResponse
-from app.models.market import OpportunitiesResponse, OpportunityHistoryResponse
+from app.models.market import FundingLeadersResponse, FundingTrendsResponse, OpportunitiesResponse, OpportunityHistoryResponse
 from app.services.arbitrage import build_opportunities
 from app.services.execution import build_execution_plan
+from app.services.funding_leaders import build_funding_leaders
 
 router = APIRouter()
 
@@ -17,6 +18,11 @@ router = APIRouter()
 @router.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok", "phase": "phase-4-monitor"}
+
+
+@router.get("/system/metrics")
+async def system_metrics(request: Request) -> dict:
+    return request.app.state.market_engine.metrics()
 
 
 @router.get("/exchanges/status")
@@ -36,6 +42,27 @@ async def arbitrage_opportunities(request: Request) -> OpportunitiesResponse:
         frontend_optional_exchanges=[],
         opportunities=opportunities,
     )
+
+
+@router.get("/exchanges/funding-leaders", response_model=FundingLeadersResponse)
+async def exchange_funding_leaders(request: Request, limit: int = 5) -> FundingLeadersResponse:
+    snapshots = await request.app.state.market_store.get_snapshots(include_exchanges={"binance", "delta"})
+    resolved_limit = max(1, min(limit, 20))
+    return build_funding_leaders(snapshots, limit=resolved_limit)
+
+
+@router.get("/exchanges/funding-trends", response_model=FundingTrendsResponse)
+async def exchange_funding_trends(
+    request: Request,
+    symbols: str,
+    exchanges: str = "binance,delta",
+    limit: int = 16,
+) -> FundingTrendsResponse:
+    symbol_list = [item.strip().upper() for item in symbols.split(",") if item.strip()]
+    exchange_list = [item.strip().lower() for item in exchanges.split(",") if item.strip()]
+    resolved_limit = max(2, min(limit, 32))
+    series = await request.app.state.history_store.get_funding_trends(symbol_list, exchange_list, resolved_limit)
+    return FundingTrendsResponse(total_series=len(series), series=series)
 
 
 @router.get("/stream")

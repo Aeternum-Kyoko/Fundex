@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { ExchangeStatus, OpportunitiesResponse } from "../lib/types";
+import type { ExchangeFundingLeaders, ExchangeStatus, FundingLeadersResponse, OpportunitiesResponse } from "../lib/types";
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "/api";
 
@@ -14,6 +14,7 @@ const emptyResponse: OpportunitiesResponse = {
 export function useMarketFeed(refreshIntervalMs = 5000) {
   const [data, setData] = useState<OpportunitiesResponse>(emptyResponse);
   const [statuses, setStatuses] = useState<ExchangeStatus[]>([]);
+  const [fundingLeaders, setFundingLeaders] = useState<ExchangeFundingLeaders[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
@@ -21,22 +22,25 @@ export function useMarketFeed(refreshIntervalMs = 5000) {
   const load = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [statusResponse, opportunitiesResponse] = await Promise.all([
+      const [statusResponse, opportunitiesResponse, fundingLeadersResponse] = await Promise.all([
         fetch(`${API_BASE}/exchanges/status`),
         fetch(`${API_BASE}/arbitrage-opportunities`),
+        fetch(`${API_BASE}/exchanges/funding-leaders`),
       ]);
 
-      if (!statusResponse.ok || !opportunitiesResponse.ok) {
+      if (!statusResponse.ok || !opportunitiesResponse.ok || !fundingLeadersResponse.ok) {
         throw new Error("Failed to fetch market data.");
       }
 
-      const [statusPayload, opportunitiesPayload] = (await Promise.all([
+      const [statusPayload, opportunitiesPayload, fundingLeadersPayload] = (await Promise.all([
         statusResponse.json(),
         opportunitiesResponse.json(),
-      ])) as [ExchangeStatus[], OpportunitiesResponse];
+        fundingLeadersResponse.json(),
+      ])) as [ExchangeStatus[], OpportunitiesResponse, FundingLeadersResponse];
 
       setStatuses(statusPayload);
       setData(opportunitiesPayload);
+      setFundingLeaders(fundingLeadersPayload.exchanges);
       setLastUpdatedAt(new Date().toISOString());
       setError(null);
     } catch (loadError) {
@@ -77,11 +81,12 @@ export function useMarketFeed(refreshIntervalMs = 5000) {
     () => ({
       data,
       statuses,
+      fundingLeaders,
       error,
       isLoading,
       lastUpdatedAt,
       refresh: load,
     }),
-    [data, statuses, error, isLoading, lastUpdatedAt, load],
+    [data, statuses, fundingLeaders, error, isLoading, lastUpdatedAt, load],
   );
 }

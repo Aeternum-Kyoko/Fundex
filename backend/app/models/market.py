@@ -74,6 +74,7 @@ class ArbitrageOpportunity(BaseModel):
     estimated_slippage_percent: float
     combined_open_interest_usd: float | None = None
     price_dislocation_percent: float | None = None
+    max_leg_age_seconds: float | None = None
     confidence_score: float
     warnings: list[str] = Field(default_factory=list)
     updated_at: datetime = Field(default_factory=utc_now)
@@ -85,6 +86,47 @@ class OpportunitiesResponse(BaseModel):
     exchanges_in_backend: list[ExchangeName]
     frontend_optional_exchanges: list[ExchangeName]
     opportunities: list[ArbitrageOpportunity]
+
+
+class FundingLeader(BaseModel):
+    exchange: ExchangeName
+    display_name: str
+    canonical_symbol: str
+    exchange_symbol: str
+    base_asset: str
+    funding_rate: float
+    next_funding_time: datetime | None = None
+    mark_price: float | None = None
+    open_interest_usd: float | None = None
+    trade_url: str
+
+
+class ExchangeFundingLeaders(BaseModel):
+    exchange: ExchangeName
+    display_name: str
+    top_positive: list[FundingLeader]
+    top_negative: list[FundingLeader]
+
+
+class FundingLeadersResponse(BaseModel):
+    total_exchanges: int
+    exchanges: list[ExchangeFundingLeaders]
+
+
+class FundingTrendPoint(BaseModel):
+    recorded_at: datetime
+    funding_rate: float
+
+
+class FundingTrendSeries(BaseModel):
+    canonical_symbol: str
+    exchange: ExchangeName
+    points: list[FundingTrendPoint]
+
+
+class FundingTrendsResponse(BaseModel):
+    total_series: int
+    series: list[FundingTrendSeries]
 
 
 class OpportunityHistoryPoint(BaseModel):

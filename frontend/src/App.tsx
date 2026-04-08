@@ -1,6 +1,11 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { FundingLeadersPanel } from "./components/FundingLeadersPanel";
+import { FundingLeadersSkeleton, OpportunityTableSkeleton } from "./components/LoadingSkeletons";
 import { OpportunityInspector } from "./components/OpportunityInspector";
 import { OpportunityTable } from "./components/OpportunityTable";
+import { useFundingTrends } from "./hooks/useFundingTrends";
+import { useMarketFeed } from "./hooks/useMarketFeed";
+import { useOpportunityHistory } from "./hooks/useOpportunityHistory";
 import {
   buildOpportunityCsv,
   formatCountdown,
@@ -8,9 +13,7 @@ import {
   formatTimestamp,
   getNextFundingTime,
 } from "./lib/monitor";
-import { useMarketFeed } from "./hooks/useMarketFeed";
-import { useOpportunityHistory } from "./hooks/useOpportunityHistory";
-import type { ArbitrageOpportunity } from "./lib/types";
+import type { ArbitrageOpportunity, FundingTrendPoint } from "./lib/types";
 
 const WATCHLIST_KEY = "arbradar-watchlist";
 const ALERTS_KEY = "arbradar-alerts";
@@ -170,8 +173,22 @@ export function App() {
   );
   const [recentAlerts, setRecentAlerts] = useState<AlertEvent[]>(() => readAlertHistory());
   const recentAlertsRef = useRef(recentAlerts);
-  const { data, statuses, error, isLoading, lastUpdatedAt, refresh } = useMarketFeed(refreshIntervalMs);
+
+  const { data, statuses, fundingLeaders, error, isLoading, lastUpdatedAt, refresh } = useMarketFeed(refreshIntervalMs);
   const deferredSearch = useDeferredValue(search);
+
+  const fundingLeaderSymbols = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          fundingLeaders.flatMap((exchange) =>
+            [...exchange.top_positive, ...exchange.top_negative].map((leader) => leader.canonical_symbol),
+          ),
+        ),
+      ),
+    [fundingLeaders],
+  );
+  const { series: fundingTrendSeries, loading: fundingTrendLoading } = useFundingTrends(fundingLeaderSymbols);
 
   useEffect(() => {
     recentAlertsRef.current = recentAlerts;
@@ -262,10 +279,24 @@ export function App() {
     });
   }, [data.opportunities, deferredSearch, sortBy, viewFilter, watchlist]);
 
-  const watchlistOpportunities = useMemo(() => {
-    const lookup = new Map(data.opportunities.map((opportunity) => [opportunity.canonical_symbol, opportunity]));
-    return watchlist.map((symbol) => lookup.get(symbol)).filter((item): item is ArbitrageOpportunity => Boolean(item));
-  }, [data.opportunities, watchlist]);
+  const opportunityMap = useMemo(
+    () => new Map(data.opportunities.map((opportunity) => [opportunity.canonical_symbol, opportunity])),
+    [data.opportunities],
+  );
+
+  const watchlistOpportunities = useMemo(
+    () => watchlist.map((symbol) => opportunityMap.get(symbol)).filter((item): item is ArbitrageOpportunity => Boolean(item)),
+    [opportunityMap, watchlist],
+  );
+
+  const fundingTrendMap = useMemo(() => {
+    const map: Record<string, Record<string, FundingTrendPoint[]>> = {};
+    fundingTrendSeries.forEach((entry) => {
+      map[entry.canonical_symbol] ??= {};
+      map[entry.canonical_symbol][entry.exchange] = entry.points;
+    });
+    return map;
+  }, [fundingTrendSeries]);
 
   const alertSource = alertPreferences.watchlistOnly ? watchlistOpportunities : filteredOpportunities;
   const activeAlerts = useMemo(() => {
@@ -282,10 +313,7 @@ export function App() {
           reasons.push(`net APR ${formatPct(opportunity.net_apr_percent)}`);
         }
 
-        return {
-          opportunity,
-          reasons,
-        };
+        return { opportunity, reasons };
       })
       .filter((item) => item.reasons.length > 0)
       .sort((left, right) => Math.abs(right.opportunity.spread_rate) - Math.abs(left.opportunity.spread_rate));
@@ -308,11 +336,11 @@ export function App() {
 
   useEffect(() => {
     setSelectedSymbol((current) =>
-      visibleOpportunities.some((opportunity) => opportunity.canonical_symbol === current)
+      data.opportunities.some((opportunity) => opportunity.canonical_symbol === current)
         ? current
-        : visibleOpportunities[0]?.canonical_symbol ?? null,
+        : visibleOpportunities[0]?.canonical_symbol ?? data.opportunities[0]?.canonical_symbol ?? null,
     );
-  }, [visibleOpportunities]);
+  }, [data.opportunities, visibleOpportunities]);
 
   useEffect(() => {
     const cooldownMs = notificationPreferences.cooldownMinutes * 60_000;
@@ -340,11 +368,7 @@ export function App() {
 
     setRecentAlerts((current) => [...additions, ...current].slice(0, 40));
 
-    if (
-      notificationPreferences.enabled &&
-      notificationPermission === "granted" &&
-      typeof Notification !== "undefined"
-    ) {
+    if (notificationPreferences.enabled && notificationPermission === "granted" && typeof Notification !== "undefined") {
       additions.slice(0, 3).forEach((event) => {
         const notification = new Notification(`ArbRadar alert: ${event.symbol}`, {
           body: event.reasons.join(" and "),
@@ -360,6 +384,14 @@ export function App() {
   const openOverview = (opportunity: ArbitrageOpportunity) => {
     setSelectedSymbol(opportunity.canonical_symbol);
     setIsOverviewOpen(true);
+  };
+
+  const openOverviewBySymbol = (canonicalSymbol: string) => {
+    const opportunity = opportunityMap.get(canonicalSymbol);
+    if (!opportunity) {
+      return;
+    }
+    openOverview(opportunity);
   };
 
   const toggleWatchlist = (symbol: string) => {
@@ -393,12 +425,7 @@ export function App() {
     const avgConfidence = averageConfidence(visibleOpportunities) * 100;
     const largestSpread = visibleOpportunities.reduce((largest, item) => Math.max(largest, Math.abs(item.spread_rate)), 0);
 
-    return {
-      positiveRows,
-      negativeRows,
-      avgConfidence,
-      largestSpread,
-    };
+    return { positiveRows, negativeRows, avgConfidence, largestSpread };
   }, [visibleOpportunities]);
 
   return (
@@ -416,7 +443,7 @@ export function App() {
         <div className="hero-card">
           <span className="chip">Current phase</span>
           <strong>Phase 4</strong>
-          <p>Monitor, notify, export, and review recent market triggers without private API keys or execution setup.</p>
+          <p>Monitor, notify, export, review, and now jump from funding boards straight into pinned rows and full overview.</p>
         </div>
       </section>
 
@@ -464,6 +491,20 @@ export function App() {
 
       {error ? <div className="banner banner-error">{error}</div> : null}
 
+      {isLoading && !fundingLeaders.length ? (
+        <FundingLeadersSkeleton />
+      ) : (
+        <FundingLeadersPanel
+          exchanges={fundingLeaders}
+          pinnedSymbols={watchlist}
+          trendMap={fundingTrendMap}
+          trendLoading={fundingTrendLoading}
+          nowTimestamp={nowTimestamp}
+          onOpenSymbol={openOverviewBySymbol}
+          onTogglePin={toggleWatchlist}
+        />
+      )}
+
       <section className="phase-three-grid">
         <section className="overview-card">
           <div className="overview-card-header">
@@ -503,7 +544,7 @@ export function App() {
           ) : (
             <div className="empty-state compact-empty">
               <p>Your watchlist is empty.</p>
-              <span>Use the Watch button in the table to pin symbols here.</span>
+              <span>Use Pin from the funding boards or Watch from the table to save symbols here.</span>
             </div>
           )}
         </section>
@@ -598,10 +639,7 @@ export function App() {
           <div className="desk-controls">
             <label className="control">
               <span className="subtle">Refresh interval</span>
-              <select
-                value={String(refreshIntervalMs)}
-                onChange={(event) => setRefreshIntervalMs(Number(event.target.value))}
-              >
+              <select value={String(refreshIntervalMs)} onChange={(event) => setRefreshIntervalMs(Number(event.target.value))}>
                 <option value="0">Paused</option>
                 <option value="5000">5 seconds</option>
                 <option value="15000">15 seconds</option>
@@ -706,11 +744,7 @@ export function App() {
           <div className="table-toolbar">
             <label className="control search-control">
               <span className="subtle">Search</span>
-              <input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search BTC, ETH, Binance, Delta..."
-              />
+              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search BTC, ETH, Binance, Delta..." />
             </label>
 
             <label className="control">
@@ -748,14 +782,18 @@ export function App() {
             </div>
           </div>
 
-          <OpportunityTable
-            opportunities={visibleOpportunities}
-            selectedSymbol={selectedOpportunity?.canonical_symbol ?? null}
-            watchlist={watchlist}
-            nowTimestamp={nowTimestamp}
-            onSelect={openOverview}
-            onToggleWatchlist={toggleWatchlist}
-          />
+          {isLoading && !visibleOpportunities.length ? (
+            <OpportunityTableSkeleton />
+          ) : (
+            <OpportunityTable
+              opportunities={visibleOpportunities}
+              selectedSymbol={selectedOpportunity?.canonical_symbol ?? null}
+              watchlist={watchlist}
+              nowTimestamp={nowTimestamp}
+              onSelect={openOverview}
+              onToggleWatchlist={toggleWatchlist}
+            />
+          )}
         </section>
       </section>
 

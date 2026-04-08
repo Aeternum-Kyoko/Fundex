@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.adapters.base import ExchangeAdapter
 from app.models.market import FundingSnapshot
-from app.services.symbols import canonicalize
+from app.services.symbol_registry import normalize_exchange_symbol
 
 
 class DeltaAdapter(ExchangeAdapter):
@@ -50,10 +50,11 @@ class DeltaAdapter(ExchangeAdapter):
             if not symbol:
                 continue
 
-            canonical_symbol, base_asset, quote_asset = canonicalize(
+            identity = normalize_exchange_symbol(
+                self.exchange,
                 symbol,
-                base_asset=item.get("underlying_asset_symbol"),
-                quote_asset="USDT",
+                base_asset_hint=item.get("underlying_asset_symbol"),
+                quote_asset_hint=item.get("quoting_asset", {}).get("symbol"),
             )
 
             reference_time = datetime.now(timezone.utc)
@@ -63,9 +64,9 @@ class DeltaAdapter(ExchangeAdapter):
                 FundingSnapshot(
                     exchange=self.exchange,
                     exchange_symbol=symbol,
-                    canonical_symbol=canonical_symbol,
-                    base_asset=base_asset,
-                    quote_asset=quote_asset,
+                    canonical_symbol=identity.canonical_symbol,
+                    base_asset=identity.base_asset,
+                    quote_asset=identity.quote_asset,
                     funding_rate=float(item["funding_rate"]) / 100,
                     funding_interval_hours=8,
                     mark_price=float(item["mark_price"]),
@@ -78,6 +79,7 @@ class DeltaAdapter(ExchangeAdapter):
                     taker_fee_bps=self._taker_fee_bps,
                     metadata={
                         "source": "delta_tickers",
+                        "source_quote_asset": identity.source_quote_asset,
                         "exchange_time": self._parse_exchange_time(item.get("time")).isoformat()
                         if item.get("time")
                         else None,

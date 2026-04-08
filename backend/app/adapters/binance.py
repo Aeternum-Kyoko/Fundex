@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from app.adapters.base import ExchangeAdapter
 from app.models.market import FundingSnapshot
-from app.services.symbols import canonicalize
+from app.services.symbol_registry import normalize_exchange_symbol
 
 
 class BinanceAdapter(ExchangeAdapter):
@@ -24,7 +24,7 @@ class BinanceAdapter(ExchangeAdapter):
             if not symbol.endswith("USDT"):
                 continue
 
-            canonical_symbol, base_asset, quote_asset = canonicalize(symbol)
+            identity = normalize_exchange_symbol(self.exchange, symbol)
             next_funding_ms = item.get("nextFundingTime")
             next_funding_time = None
             if next_funding_ms:
@@ -34,9 +34,9 @@ class BinanceAdapter(ExchangeAdapter):
                 FundingSnapshot(
                     exchange=self.exchange,
                     exchange_symbol=symbol,
-                    canonical_symbol=canonical_symbol,
-                    base_asset=base_asset,
-                    quote_asset=quote_asset,
+                    canonical_symbol=identity.canonical_symbol,
+                    base_asset=identity.base_asset,
+                    quote_asset=identity.quote_asset,
                     funding_rate=float(item["lastFundingRate"]),
                     funding_interval_hours=8,
                     mark_price=float(item["markPrice"]),
@@ -44,7 +44,10 @@ class BinanceAdapter(ExchangeAdapter):
                     next_funding_time=next_funding_time,
                     maker_fee_bps=self._maker_fee_bps,
                     taker_fee_bps=self._taker_fee_bps,
-                    metadata={"source": "premiumIndex"},
+                    metadata={
+                        "source": "premiumIndex",
+                        "source_quote_asset": identity.source_quote_asset,
+                    },
                 )
             )
 

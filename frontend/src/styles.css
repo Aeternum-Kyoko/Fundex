@@ -71,7 +71,9 @@ button {
 .overview-grid,
 .inspector-top,
 .phase-three-grid,
-.watchlist-grid {
+.watchlist-grid,
+.funding-leaders-grid,
+.funding-lists-grid {
   display: grid;
   gap: 18px;
 }
@@ -275,6 +277,20 @@ button {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.funding-leaders-grid {
+  margin-top: 24px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.funding-lists-grid {
+  margin-top: 18px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.funding-exchange-card {
+  min-height: 100%;
+}
+
 .panel {
   padding: 24px;
   background: var(--surface-strong);
@@ -395,6 +411,97 @@ button {
   color: inherit;
 }
 
+.funding-list-card {
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 16px;
+}
+
+.funding-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.funding-item {
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 14px;
+}
+
+.funding-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.funding-item-top,
+.funding-item-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.funding-item-meta {
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.funding-item-actions {
+  align-items: start;
+}
+
+.leader-open-button,
+.inline-link,
+.button-link {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  text-align: left;
+  text-decoration: none;
+}
+
+.leader-open-button {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.leader-open-button strong,
+.inline-link {
+  color: var(--muted-strong);
+}
+
+.funding-sparkline-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.funding-item-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.funding-sparkline,
+.sparkline-placeholder {
+  width: 120px;
+  height: 30px;
+  flex-shrink: 0;
+}
+
+.sparkline-placeholder {
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.06));
+}
+
 .watchlist-card:hover,
 .alert-item:hover {
   background: rgba(255, 255, 255, 0.08);
@@ -472,6 +579,10 @@ button {
   overflow: auto;
   border-radius: 24px;
   background: rgba(7, 11, 20, 0.86);
+}
+
+.mobile-opportunity-list {
+  display: none;
 }
 
 .opportunity-table {
@@ -724,6 +835,117 @@ button {
   background: rgba(255, 255, 255, 0.04);
 }
 
+.skeleton-card,
+.skeleton-table {
+  overflow: hidden;
+}
+
+.skeleton-line,
+.skeleton-item,
+.skeleton-row {
+  position: relative;
+  overflow: hidden;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.skeleton-line::after,
+.skeleton-item::after,
+.skeleton-row::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.12), transparent);
+  animation: shimmer 1.4s infinite;
+}
+
+.skeleton-line {
+  height: 14px;
+}
+
+.skeleton-line-lg {
+  width: 46%;
+  height: 18px;
+}
+
+.skeleton-line-md {
+  width: 62%;
+}
+
+.skeleton-line-sm {
+  width: 34%;
+}
+
+.skeleton-stack {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.skeleton-item,
+.skeleton-row {
+  min-height: 72px;
+  padding: 14px;
+}
+
+.skeleton-table-header {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 14px;
+  padding: 18px;
+}
+
+.mobile-opportunity-card {
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 22px;
+  padding: 16px;
+}
+
+.selected-mobile-card {
+  border-color: rgba(126, 224, 195, 0.34);
+  background: rgba(126, 224, 195, 0.08);
+}
+
+.mobile-card-main {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+}
+
+.mobile-card-header,
+.mobile-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.mobile-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.mobile-card-grid span,
+.mobile-card-grid strong {
+  display: block;
+}
+
+.mobile-card-actions {
+  margin-top: 16px;
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
 .history-chart {
   width: 100%;
   height: 220px;
@@ -735,7 +957,9 @@ button {
   .summary-grid,
   .metric-grid,
   .overview-grid,
-  .phase-three-grid {
+  .phase-three-grid,
+  .funding-leaders-grid,
+  .funding-lists-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -758,7 +982,9 @@ button {
   .detail-grid,
   .watchlist-grid,
   .alert-controls,
-  .phase-three-grid {
+  .phase-three-grid,
+  .funding-leaders-grid,
+  .funding-lists-grid {
     grid-template-columns: 1fr;
   }
 
@@ -776,7 +1002,9 @@ button {
   .table-toolbar,
   .metric-grid,
   .overview-grid,
-  .phase-three-grid {
+  .phase-three-grid,
+  .funding-leaders-grid,
+  .funding-lists-grid {
     grid-template-columns: 1fr;
   }
 
@@ -791,11 +1019,22 @@ button {
     padding: 18px;
   }
 
-  .opportunity-table {
-    min-width: 980px;
+  .desktop-table-shell {
+    display: none;
   }
 
-  .coin-cell {
-    min-width: 220px;
+  .mobile-opportunity-list {
+    display: grid;
+    gap: 14px;
+  }
+
+  .mobile-card-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (min-width: 761px) {
+  .desktop-table-shell {
+    display: block;
   }
 }

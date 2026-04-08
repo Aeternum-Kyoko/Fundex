@@ -29,6 +29,7 @@ export interface ArbitrageOpportunity {
   estimated_slippage_percent: number;
   combined_open_interest_usd: number | null;
   price_dislocation_percent: number | null;
+  max_leg_age_seconds?: number | null;
   confidence_score: number;
   warnings: string[];
   updated_at: string;
@@ -51,6 +52,47 @@ export interface OpportunitiesResponse {
   exchanges_in_backend: ExchangeName[];
   frontend_optional_exchanges: ExchangeName[];
   opportunities: ArbitrageOpportunity[];
+}
+
+export interface FundingLeader {
+  exchange: ExchangeName;
+  display_name: string;
+  canonical_symbol: string;
+  exchange_symbol: string;
+  base_asset: string;
+  funding_rate: number;
+  next_funding_time: string | null;
+  mark_price: number | null;
+  open_interest_usd: number | null;
+  trade_url: string;
+}
+
+export interface ExchangeFundingLeaders {
+  exchange: ExchangeName;
+  display_name: string;
+  top_positive: FundingLeader[];
+  top_negative: FundingLeader[];
+}
+
+export interface FundingLeadersResponse {
+  total_exchanges: number;
+  exchanges: ExchangeFundingLeaders[];
+}
+
+export interface FundingTrendPoint {
+  recorded_at: string;
+  funding_rate: number;
+}
+
+export interface FundingTrendSeries {
+  canonical_symbol: string;
+  exchange: ExchangeName;
+  points: FundingTrendPoint[];
+}
+
+export interface FundingTrendsResponse {
+  total_series: number;
+  series: FundingTrendSeries[];
 }
 
 export interface OpportunityHistoryPoint {
