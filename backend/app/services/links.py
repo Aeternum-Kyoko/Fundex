@@ -1,0 +1,28 @@
+from __future__ import annotations
+
+from app.models.market import ExchangeName
+
+
+DISPLAY_NAMES: dict[ExchangeName, str] = {
+    "binance": "Binance",
+    "delta": "Delta Exchange India",
+    "coindcx": "CoinDCX",
+    "coinswitch": "CoinSwitch",
+}
+
+
+def exchange_display_name(exchange: ExchangeName) -> str:
+    return DISPLAY_NAMES[exchange]
+
+
+def exchange_trade_url(exchange: ExchangeName, exchange_symbol: str) -> str:
+    symbol = exchange_symbol.upper()
+    if exchange == "binance":
+        return f"https://www.binance.com/en/futures/{symbol}"
+    if exchange == "delta":
+        return f"https://www.delta.exchange/app/futures/trade/{symbol.lower()}"
+    if exchange == "coindcx":
+        return "https://coindcx.com/crypto-futures/"
+    if exchange == "coinswitch":
+        return "https://coinswitch.co/pro"
+    return "#"

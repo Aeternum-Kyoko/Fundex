@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+node_modules/
+dist/
+build/
+.env
+.DS_Store
+backend/data/
+*.log
+dashboard-check.png
+frontend/*check.png
