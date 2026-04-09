@@ -2,15 +2,24 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from app.models.execution import ExecutionPlanResponse
-from app.models.market import FundingLeadersResponse, FundingTrendsResponse, OpportunitiesResponse, OpportunityHistoryResponse
+from app.models.market import (
+    FundingLeadersResponse,
+    FundingTrendsResponse,
+    OpportunitiesResponse,
+    OpportunityHistoryResponse,
+    SymbolComparisonExchangeSnapshot,
+    SymbolComparisonResponse,
+)
 from app.services.arbitrage import build_opportunities
 from app.services.execution import build_execution_plan
 from app.services.funding_leaders import build_funding_leaders
+from app.services.links import exchange_display_name, exchange_trade_url
 
 router = APIRouter()
 
@@ -105,6 +114,50 @@ async def opportunity_history(request: Request, canonical_symbol: str, limit: in
     return OpportunityHistoryResponse(canonical_symbol=canonical_symbol, total=len(points), points=points)
 
 
+@router.get("/symbols/{canonical_symbol}/comparison", response_model=SymbolComparisonResponse)
+async def symbol_comparison(request: Request, canonical_symbol: str) -> SymbolComparisonResponse:
+    snapshots = await request.app.state.market_store.get_snapshots()
+    normalized_symbol = canonical_symbol.upper()
+    symbol_snapshots = [snapshot for snapshot in snapshots if snapshot.canonical_symbol.upper() == normalized_symbol]
+
+    if not symbol_snapshots:
+        raise HTTPException(status_code=404, detail="Symbol not found in the current live comparison set.")
+
+    opportunities = build_opportunities(snapshots, request.app.state.settings)
+    best_opportunity = next((item for item in opportunities if item.canonical_symbol.upper() == normalized_symbol), None)
+    now = datetime.now(timezone.utc)
+
+    comparison_rows = [
+        SymbolComparisonExchangeSnapshot(
+            exchange=snapshot.exchange,
+            display_name=exchange_display_name(snapshot.exchange),
+            exchange_symbol=snapshot.exchange_symbol,
+            funding_rate=snapshot.funding_rate,
+            estimated_funding_rate=snapshot.metadata.get("estimated_funding_rate"),
+            funding_interval_hours=snapshot.funding_interval_hours,
+            mark_price=snapshot.mark_price,
+            open_interest_usd=snapshot.open_interest_usd,
+            volume_24h=snapshot.volume_24h,
+            next_funding_time=snapshot.next_funding_time,
+            maker_fee_bps=snapshot.maker_fee_bps,
+            taker_fee_bps=snapshot.taker_fee_bps,
+            trade_url=exchange_trade_url(snapshot.exchange, snapshot.exchange_symbol),
+            data_age_seconds=max((now - snapshot.fetched_at).total_seconds(), 0.0),
+        )
+        for snapshot in sorted(symbol_snapshots, key=lambda item: (item.funding_rate, item.exchange))
+    ]
+
+    first = symbol_snapshots[0]
+    return SymbolComparisonResponse(
+        canonical_symbol=first.canonical_symbol,
+        base_asset=first.base_asset,
+        quote_asset=first.quote_asset,
+        total_exchanges=len(comparison_rows),
+        exchanges=comparison_rows,
+        best_opportunity=best_opportunity,
+    )
+
+
 @router.get("/telegram/status")
 async def telegram_status(request: Request) -> dict:
     return request.app.state.telegram_notifier.status()
@@ -162,8 +215,6 @@ async def execution_plan(
     opportunities = build_opportunities(snapshots, request.app.state.settings)
     opportunity = next((item for item in opportunities if item.canonical_symbol == canonical_symbol), None)
     if opportunity is None:
-        from fastapi import HTTPException
-
         raise HTTPException(status_code=404, detail="Opportunity not found in the current filtered set.")
 
     return build_execution_plan(

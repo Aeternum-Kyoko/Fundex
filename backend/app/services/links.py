@@ -20,7 +20,12 @@ def exchange_trade_url(exchange: ExchangeName, exchange_symbol: str) -> str:
     if exchange == "binance":
         return f"https://www.binance.com/en/futures/{symbol}"
     if exchange == "delta":
-        return f"https://www.delta.exchange/app/futures/trade/{symbol.lower()}"
+        base_asset = symbol
+        for quote in ("USDT", "USD"):
+            if symbol.endswith(quote) and len(symbol) > len(quote):
+                base_asset = symbol[: -len(quote)]
+                break
+        return f"https://www.delta.exchange/app/futures/trade/{base_asset}/{symbol}"
     if exchange == "coindcx":
         return "https://coindcx.com/crypto-futures/"
     if exchange == "coinswitch":

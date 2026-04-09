@@ -95,6 +95,32 @@ export interface FundingTrendsResponse {
   series: FundingTrendSeries[];
 }
 
+export interface SymbolComparisonExchangeSnapshot {
+  exchange: ExchangeName;
+  display_name: string;
+  exchange_symbol: string;
+  funding_rate: number;
+  estimated_funding_rate: number | null;
+  funding_interval_hours: number;
+  mark_price: number | null;
+  open_interest_usd: number | null;
+  volume_24h: number | null;
+  next_funding_time: string | null;
+  maker_fee_bps: number;
+  taker_fee_bps: number;
+  trade_url: string;
+  data_age_seconds: number | null;
+}
+
+export interface SymbolComparisonResponse {
+  canonical_symbol: string;
+  base_asset: string;
+  quote_asset: string;
+  total_exchanges: number;
+  exchanges: SymbolComparisonExchangeSnapshot[];
+  best_opportunity: ArbitrageOpportunity | null;
+}
+
 export interface OpportunityHistoryPoint {
   recorded_at: string;
   net_apr_percent: number;

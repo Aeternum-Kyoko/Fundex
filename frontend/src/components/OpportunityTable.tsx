@@ -93,6 +93,13 @@ export function OpportunityTable({
                         >
                           Overview
                         </button>
+                        <a
+                          className="overview-button compare-button-link"
+                          href={`/compare/${encodeURIComponent(opportunity.canonical_symbol)}`}
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          Compare
+                        </a>
                       </div>
                     </div>
                   </td>
@@ -198,6 +205,9 @@ export function OpportunityTable({
                 <button type="button" className="overview-button" onClick={() => onSelect(opportunity)}>
                   Overview
                 </button>
+                <a className="overview-button compare-button-link" href={`/compare/${encodeURIComponent(opportunity.canonical_symbol)}`}>
+                  Compare
+                </a>
               </div>
             </article>
           );

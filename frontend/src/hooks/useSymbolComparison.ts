@@ -1,0 +1,54 @@
+import { useEffect, useState } from "react";
+import type { SymbolComparisonResponse } from "../lib/types";
+
+const API_BASE = import.meta.env.VITE_API_URL ?? "/api";
+
+export function useSymbolComparison(canonicalSymbol: string | null) {
+  const [comparison, setComparison] = useState<SymbolComparisonResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const load = async () => {
+      if (!canonicalSymbol) {
+        setComparison(null);
+        setError("Missing symbol.");
+        return;
+      }
+
+      setComparison(null);
+      setError(null);
+      setLoading(true);
+      try {
+        const response = await fetch(`${API_BASE}/symbols/${encodeURIComponent(canonicalSymbol)}/comparison`);
+        if (!response.ok) {
+          throw new Error("Failed to load symbol comparison.");
+        }
+
+        const payload = (await response.json()) as SymbolComparisonResponse;
+        if (!cancelled) {
+          setComparison(payload);
+          setError(null);
+        }
+      } catch (loadError) {
+        if (!cancelled) {
+          setComparison(null);
+          setError(loadError instanceof Error ? loadError.message : "Failed to load symbol comparison.");
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [canonicalSymbol]);
+
+  return { comparison, loading, error };
+}

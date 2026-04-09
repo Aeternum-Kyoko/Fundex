@@ -268,6 +268,103 @@ button {
   color: var(--danger);
 }
 
+.compare-page {
+  width: min(1440px, calc(100vw - 32px));
+}
+
+.compare-hero {
+  grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.85fr);
+}
+
+.compare-top-actions,
+.compare-card-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.compare-link {
+  text-decoration: none;
+}
+
+.compare-summary-grid {
+  margin-bottom: 22px;
+}
+
+.compare-panel {
+  margin-top: 22px;
+}
+
+.compare-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 18px;
+}
+
+.compare-manual-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.compare-exchange-card {
+  padding: 22px;
+}
+
+.compare-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px 18px;
+}
+
+.compare-diagnostics {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+
+.compare-warning-list {
+  margin-top: 14px;
+}
+
+.compare-execution-card,
+.compare-execution-summary {
+  padding: 22px;
+}
+
+.comparison-chart-card {
+  padding: 18px;
+}
+
+.comparison-chart-meta {
+  margin-bottom: 16px;
+}
+
+.comparison-history-chart {
+  min-height: 240px;
+}
+
+.comparison-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 18px;
+  margin-top: 16px;
+}
+
+.comparison-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+
+.comparison-legend-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  display: inline-block;
+}
+
 .workspace {
   margin-top: 24px;
 }
@@ -959,7 +1056,9 @@ button {
   .overview-grid,
   .phase-three-grid,
   .funding-leaders-grid,
-  .funding-lists-grid {
+  .funding-lists-grid,
+  .compare-manual-grid,
+  .compare-card-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -980,6 +1079,7 @@ button {
   .status-grid,
   .inspector-top,
   .detail-grid,
+  .compare-detail-grid,
   .watchlist-grid,
   .alert-controls,
   .phase-three-grid,
@@ -1004,7 +1104,10 @@ button {
   .overview-grid,
   .phase-three-grid,
   .funding-leaders-grid,
-  .funding-lists-grid {
+  .funding-lists-grid,
+  .compare-manual-grid,
+  .compare-card-grid,
+  .compare-detail-grid {
     grid-template-columns: 1fr;
   }
 

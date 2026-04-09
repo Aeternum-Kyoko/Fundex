@@ -129,6 +129,32 @@ class FundingTrendsResponse(BaseModel):
     series: list[FundingTrendSeries]
 
 
+class SymbolComparisonExchangeSnapshot(BaseModel):
+    exchange: ExchangeName
+    display_name: str
+    exchange_symbol: str
+    funding_rate: float
+    estimated_funding_rate: float | None = None
+    funding_interval_hours: int
+    mark_price: float | None = None
+    open_interest_usd: float | None = None
+    volume_24h: float | None = None
+    next_funding_time: datetime | None = None
+    maker_fee_bps: float
+    taker_fee_bps: float
+    trade_url: str
+    data_age_seconds: float | None = None
+
+
+class SymbolComparisonResponse(BaseModel):
+    canonical_symbol: str
+    base_asset: str
+    quote_asset: str
+    total_exchanges: int
+    exchanges: list[SymbolComparisonExchangeSnapshot]
+    best_opportunity: ArbitrageOpportunity | None = None
+
+
 class OpportunityHistoryPoint(BaseModel):
     recorded_at: datetime
     net_apr_percent: float

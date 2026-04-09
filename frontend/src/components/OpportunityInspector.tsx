@@ -80,6 +80,9 @@ export function OpportunityInspector({
             <div className={opportunity.net_apr_percent >= 0 ? "phase-pill" : "overview-badge negative-badge"}>
               {formatPct(opportunity.net_apr_percent)}
             </div>
+            <a className="overview-button compare-button-link" href={`/compare/${encodeURIComponent(opportunity.canonical_symbol)}`}>
+              Compare
+            </a>
             <button type="button" className="close-button" onClick={onClose} aria-label="Close overview">
               Close
             </button>
