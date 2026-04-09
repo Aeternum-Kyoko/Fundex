@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+from app.core.config import Settings
 from app.models.market import ArbitrageOpportunity, FundingSnapshot
 from app.services.funding_leaders import build_funding_leaders
 from app.services.history_store import HistoryStore
@@ -54,8 +55,9 @@ def exchange_symbol_lines(opportunity: ArbitrageOpportunity) -> list[str]:
 
 
 class TelegramCommandService:
-    def __init__(self, history_store: HistoryStore) -> None:
+    def __init__(self, history_store: HistoryStore, settings: Settings) -> None:
         self.history_store = history_store
+        self.settings = settings
 
     async def build_reply(
         self,
@@ -123,13 +125,11 @@ class TelegramCommandService:
         if upper in {"/ALERTS ON", "/ALERTS OFF"}:
             enabled = upper.endswith("ON")
             await self.history_store.set_alerts_enabled(chat_id, enabled)
-            state = "on" if enabled else "off"
-            return f"Automatic alerts are now <b>{state}</b> for this chat."
+            return self._format_alerts_status(enabled, opportunities)
 
         if upper == "/ALERTS":
             enabled = await self.history_store.get_alerts_enabled(chat_id)
-            state = "on" if enabled else "off"
-            return f"Automatic alerts are currently <b>{state}</b> for this chat."
+            return self._format_alerts_status(enabled, opportunities)
 
         if upper.startswith("/COMPARE"):
             parts = normalized.split(maxsplit=1)
@@ -396,6 +396,74 @@ class TelegramCommandService:
             f"Automatic alerts - <b>{'on' if alerts_enabled else 'off'}</b>\n"
             f"Watchlist size - <b>{len(watchlist)}</b>\n"
             f"Saved symbols - {', '.join(watchlist[:8]) if watchlist else 'none'}"
+        )
+
+    def _format_alerts_status(self, enabled: bool, opportunities: list[ArbitrageOpportunity]) -> str:
+        state = "on" if enabled else "off"
+        ranked = self._rank_live_alerts(opportunities)
+        parts = [f"Automatic alerts are currently <b>{state}</b> for this chat."]
+
+        if not ranked:
+            parts.extend(
+                [
+                    "",
+                    "No live alerts match the current thresholds right now.",
+                ]
+            )
+            return "\n".join(parts)
+
+        now = datetime.now(timezone.utc)
+        parts.extend(["", f"<b>Live alerts right now</b>", f"Showing top {len(ranked)} qualified symbols."])
+
+        for index, opportunity in enumerate(ranked, start=1):
+            next_funding_time = earliest_funding_time(opportunity)
+            parts.extend(
+                [
+                    "",
+                    f"<b>{index}. {opportunity.canonical_symbol}</b>",
+                    f"Spread - {opportunity.spread_rate * 100:.3f}%",
+                    f"Buy / Long - {opportunity.long_leg.display_name}",
+                    f"Sell / Short - {opportunity.short_leg.display_name}",
+                    f"Confidence - {opportunity.confidence_score * 100:.0f}/100",
+                    f"Combined OI - {self._format_usd(opportunity.combined_open_interest_usd)}",
+                    f"Funding expiry - {format_countdown(next_funding_time, now)}",
+                ]
+            )
+
+        return "\n".join(parts)
+
+    def _rank_live_alerts(self, opportunities: list[ArbitrageOpportunity]) -> list[ArbitrageOpportunity]:
+        qualified = [
+            opportunity
+            for opportunity in opportunities
+            if not self._alert_quality_failures(opportunity)
+        ]
+        return sorted(qualified, key=self._sort_key)[: self.settings.telegram_top_n]
+
+    def _alert_quality_failures(self, opportunity: ArbitrageOpportunity) -> list[str]:
+        reasons: list[str] = []
+
+        if opportunity.spread_rate * 100 < self.settings.telegram_min_spread_percent:
+            reasons.append(f"spread below {self.settings.telegram_min_spread_percent:.2f}%")
+
+        if opportunity.confidence_score < self.settings.telegram_min_confidence_score:
+            reasons.append(f"confidence below {self.settings.telegram_min_confidence_score:.2f}")
+
+        combined_oi = opportunity.combined_open_interest_usd or 0.0
+        if combined_oi < self.settings.telegram_min_combined_oi_usd:
+            reasons.append(f"combined OI below ${self.settings.telegram_min_combined_oi_usd:,.0f}")
+
+        max_age = opportunity.max_leg_age_seconds
+        if max_age is None or max_age > self.settings.telegram_max_staleness_seconds:
+            reasons.append(f"stale data above {self.settings.telegram_max_staleness_seconds}s")
+
+        return reasons
+
+    def _sort_key(self, opportunity: ArbitrageOpportunity) -> tuple[datetime, float, str]:
+        return (
+            earliest_funding_time(opportunity) or datetime.max.replace(tzinfo=timezone.utc),
+            -opportunity.spread_rate,
+            opportunity.base_asset,
         )
 
     def _display_name(self, exchange: str) -> str:

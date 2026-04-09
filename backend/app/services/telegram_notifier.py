@@ -68,7 +68,7 @@ class TelegramNotifier:
         self.client = client
         self.settings = settings
         self.history_store = history_store
-        self.command_service = TelegramCommandService(history_store)
+        self.command_service = TelegramCommandService(history_store, settings)
         self._last_sent_signature: str | None = None
         self._last_sent_at: datetime | None = None
         self._last_summary_signatures: dict[str, str] = {}

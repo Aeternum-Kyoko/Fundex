@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from app.core.config import Settings
 from app.services.history_store import HistoryStore
 from app.services.telegram_commands import TelegramCommandService
 from tests.test_helpers import make_opportunity, make_snapshot
@@ -13,7 +14,7 @@ class TelegramCommandTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.store = HistoryStore(Path(self.temp_dir.name) / "test.db")
-        self.service = TelegramCommandService(self.store)
+        self.service = TelegramCommandService(self.store, Settings())
         self.opportunities = [
             make_opportunity(canonical_symbol="SOL-USDT-PERP", long_symbol="SOLUSD", short_symbol="SOLUSDT"),
             make_opportunity(canonical_symbol="SOLV-USDT-PERP", long_symbol="SOLVUSD", short_symbol="SOLVUSDT"),
@@ -93,3 +94,21 @@ class TelegramCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("/compare BTC", reply)
         self.assertIn("/status", reply)
         self.assertIn("/exchanges", reply)
+
+    async def test_alerts_on_reports_state_and_current_live_alerts(self) -> None:
+        opportunities = [
+            make_opportunity(
+                canonical_symbol="BTC-USDT-PERP",
+                long_exchange="delta",
+                short_exchange="binance",
+                spread_rate=0.006,
+                confidence_score=0.92,
+                combined_open_interest_usd=2_500_000,
+            )
+        ]
+
+        reply = await self.service.build_reply("chat-1", "/alerts on", [], opportunities)
+
+        self.assertIn("currently <b>on</b>", reply)
+        self.assertIn("Live alerts right now", reply)
+        self.assertIn("BTC-USDT-PERP", reply)
