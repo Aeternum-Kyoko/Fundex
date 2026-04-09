@@ -295,6 +295,38 @@ button {
   margin-top: 22px;
 }
 
+.settlement-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 18px;
+}
+
+.settlement-card {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 22px;
+  padding: 18px;
+  background: rgba(255, 255, 255, 0.03);
+  display: grid;
+  gap: 14px;
+}
+
+.settlement-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settlement-open-button {
+  text-align: left;
+}
+
+.settlement-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
 .compare-card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -302,6 +334,12 @@ button {
 }
 
 .compare-manual-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.comparison-metric-chart-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 18px;
@@ -363,6 +401,10 @@ button {
   height: 12px;
   border-radius: 999px;
   display: inline-block;
+}
+
+.comparison-metric-card {
+  min-height: 220px;
 }
 
 .workspace {
@@ -1057,8 +1099,10 @@ button {
   .phase-three-grid,
   .funding-leaders-grid,
   .funding-lists-grid,
+  .settlement-grid,
   .compare-manual-grid,
-  .compare-card-grid {
+  .compare-card-grid,
+  .comparison-metric-chart-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -1105,9 +1149,15 @@ button {
   .phase-three-grid,
   .funding-leaders-grid,
   .funding-lists-grid,
+  .settlement-grid,
   .compare-manual-grid,
   .compare-card-grid,
-  .compare-detail-grid {
+  .compare-detail-grid,
+  .comparison-metric-chart-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settlement-metrics {
     grid-template-columns: 1fr;
   }
 

@@ -55,3 +55,13 @@ class HistoryStoreRetentionTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(int(stats["funding_snapshots_deleted"]), 1)
         self.assertGreaterEqual(int(stats["opportunity_history_deleted"]), 1)
         self.assertGreaterEqual(int(stats["telegram_alert_state_deleted"]), 1)
+
+    async def test_daily_summary_state_round_trip(self) -> None:
+        await self.store.mark_daily_summary_sent("2026-04-09")
+
+        state = await self.store.get_daily_summary_state()
+
+        self.assertIsNotNone(state)
+        assert state is not None
+        self.assertEqual(state["last_sent_local_date"], "2026-04-09")
+        self.assertIn("last_sent_at", state)

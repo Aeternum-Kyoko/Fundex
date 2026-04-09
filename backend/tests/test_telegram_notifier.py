@@ -7,9 +7,10 @@ from pathlib import Path
 from httpx import AsyncClient
 
 from app.core.config import Settings
+from app.models.market import FundingSnapshot
 from app.services.history_store import HistoryStore
 from app.services.telegram_notifier import TelegramNotifier
-from tests.test_helpers import make_opportunity
+from tests.test_helpers import make_opportunity, make_snapshot
 
 
 class TelegramNotifierTests(unittest.IsolatedAsyncioTestCase):
@@ -53,3 +54,48 @@ class TelegramNotifierTests(unittest.IsolatedAsyncioTestCase):
         batch = await self.notifier._build_transition_batch([opportunity])  # noqa: SLF001
 
         self.assertIsNone(batch)
+
+    async def test_daily_summary_preview_includes_expected_sections(self) -> None:
+        snapshots: list[FundingSnapshot] = [
+            make_snapshot(exchange="binance", canonical_symbol="BTC-USDT-PERP", funding_rate=0.003),
+            make_snapshot(exchange="delta", canonical_symbol="ETH-USDT-PERP", funding_rate=-0.002),
+            make_snapshot(exchange="coindcx", canonical_symbol="SOL-USDT-PERP", funding_rate=0.0015),
+        ]
+        opportunities = [
+            make_opportunity(canonical_symbol="BTC-USDT-PERP", spread_rate=0.01),
+            make_opportunity(canonical_symbol="ETH-USDT-PERP", spread_rate=0.0075),
+        ]
+
+        batch = await self.notifier._build_daily_summary_batch(  # noqa: SLF001
+            snapshots,
+            opportunities,
+            ignore_schedule=True,
+        )
+
+        self.assertIsNotNone(batch)
+        assert batch is not None
+        self.assertIn("Top Positive Funding", batch.message)
+        self.assertIn("Top Negative Funding", batch.message)
+        self.assertIn("Best Spreads", batch.message)
+        self.assertIn("Upcoming Funding Expiries", batch.message)
+        self.assertIn("BTC-USDT-PERP", batch.message)
+
+    async def test_daily_summary_preview_uses_requested_schedule_label(self) -> None:
+        snapshots: list[FundingSnapshot] = [
+            make_snapshot(exchange="binance", canonical_symbol="BTC-USDT-PERP", funding_rate=0.003),
+        ]
+        opportunities = [
+            make_opportunity(canonical_symbol="BTC-USDT-PERP", spread_rate=0.01),
+        ]
+
+        batch = await self.notifier.preview_daily_summary(
+            snapshots,
+            opportunities,
+            summary_key="night",
+        )
+
+        self.assertIsNotNone(batch)
+        assert batch is not None
+        self.assertEqual(batch.summary_key, "night")
+        self.assertEqual(batch.summary_label, "Night Summary")
+        self.assertIn("Night Summary", batch.message)

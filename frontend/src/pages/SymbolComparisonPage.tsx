@@ -1,7 +1,9 @@
 import { useMemo } from "react";
 import { FundingTrendChart } from "../components/FundingTrendChart";
+import { OpportunityHistoryChart } from "../components/OpportunityHistoryChart";
 import { useExecutionPlan } from "../hooks/useExecutionPlan";
 import { useFundingTrends } from "../hooks/useFundingTrends";
+import { useOpportunityHistory } from "../hooks/useOpportunityHistory";
 import { useSymbolComparison } from "../hooks/useSymbolComparison";
 import { formatCountdown, formatPct, formatTimestamp, formatUsd } from "../lib/monitor";
 
@@ -51,6 +53,10 @@ export function SymbolComparisonPage({ canonicalSymbol }: { canonicalSymbol: str
     comparison ? [comparison.canonical_symbol] : [],
     exchangeNames,
     24,
+  );
+  const { points: opportunityHistory, loading: historyLoading } = useOpportunityHistory(
+    comparison?.canonical_symbol ?? null,
+    64,
   );
 
   const bestOpportunity = comparison?.best_opportunity ?? null;
@@ -362,6 +368,19 @@ export function SymbolComparisonPage({ canonicalSymbol }: { canonicalSymbol: str
                 <span>This appears when the symbol has a live best pair across exchanges.</span>
               </div>
             )}
+          </section>
+
+          <section className="panel compare-panel">
+            <div className="panel-header">
+              <div>
+                <p className="eyebrow">Spread History</p>
+                <h2>Spread, net APR, and confidence</h2>
+                <div className="subtle">Historical spread quality for this symbol based on the live opportunity engine.</div>
+              </div>
+              <div className="panel-note">{historyLoading ? "Loading history" : `${opportunityHistory.length} points`}</div>
+            </div>
+
+            <OpportunityHistoryChart points={opportunityHistory} />
           </section>
 
           <section className="panel compare-panel">

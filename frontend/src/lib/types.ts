@@ -79,6 +79,24 @@ export interface FundingLeadersResponse {
   exchanges: ExchangeFundingLeaders[];
 }
 
+export interface FundingSettlementItem {
+  exchange: ExchangeName;
+  display_name: string;
+  canonical_symbol: string;
+  exchange_symbol: string;
+  funding_rate: number;
+  funding_interval_hours: number;
+  next_funding_time: string | null;
+  mark_price: number | null;
+  open_interest_usd: number | null;
+  trade_url: string;
+}
+
+export interface FundingSettlementResponse {
+  total: number;
+  items: FundingSettlementItem[];
+}
+
 export interface FundingTrendPoint {
   recorded_at: string;
   funding_rate: number;

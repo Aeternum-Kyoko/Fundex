@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { ExchangeFundingLeaders, ExchangeStatus, FundingLeadersResponse, OpportunitiesResponse } from "../lib/types";
+import type {
+  ExchangeFundingLeaders,
+  ExchangeStatus,
+  FundingLeadersResponse,
+  FundingSettlementItem,
+  FundingSettlementResponse,
+  OpportunitiesResponse,
+} from "../lib/types";
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "/api";
 
@@ -15,6 +22,7 @@ export function useMarketFeed(refreshIntervalMs = 5000) {
   const [data, setData] = useState<OpportunitiesResponse>(emptyResponse);
   const [statuses, setStatuses] = useState<ExchangeStatus[]>([]);
   const [fundingLeaders, setFundingLeaders] = useState<ExchangeFundingLeaders[]>([]);
+  const [fundingSettlements, setFundingSettlements] = useState<FundingSettlementItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
@@ -22,25 +30,28 @@ export function useMarketFeed(refreshIntervalMs = 5000) {
   const load = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [statusResponse, opportunitiesResponse, fundingLeadersResponse] = await Promise.all([
+      const [statusResponse, opportunitiesResponse, fundingLeadersResponse, fundingSettlementsResponse] = await Promise.all([
         fetch(`${API_BASE}/exchanges/status`),
         fetch(`${API_BASE}/arbitrage-opportunities`),
         fetch(`${API_BASE}/exchanges/funding-leaders`),
+        fetch(`${API_BASE}/exchanges/funding-settlements`),
       ]);
 
-      if (!statusResponse.ok || !opportunitiesResponse.ok || !fundingLeadersResponse.ok) {
+      if (!statusResponse.ok || !opportunitiesResponse.ok || !fundingLeadersResponse.ok || !fundingSettlementsResponse.ok) {
         throw new Error("Failed to fetch market data.");
       }
 
-      const [statusPayload, opportunitiesPayload, fundingLeadersPayload] = (await Promise.all([
+      const [statusPayload, opportunitiesPayload, fundingLeadersPayload, fundingSettlementsPayload] = (await Promise.all([
         statusResponse.json(),
         opportunitiesResponse.json(),
         fundingLeadersResponse.json(),
-      ])) as [ExchangeStatus[], OpportunitiesResponse, FundingLeadersResponse];
+        fundingSettlementsResponse.json(),
+      ])) as [ExchangeStatus[], OpportunitiesResponse, FundingLeadersResponse, FundingSettlementResponse];
 
       setStatuses(statusPayload);
       setData(opportunitiesPayload);
       setFundingLeaders(fundingLeadersPayload.exchanges);
+      setFundingSettlements(fundingSettlementsPayload.items);
       setLastUpdatedAt(new Date().toISOString());
       setError(null);
     } catch (loadError) {
@@ -82,11 +93,12 @@ export function useMarketFeed(refreshIntervalMs = 5000) {
       data,
       statuses,
       fundingLeaders,
+      fundingSettlements,
       error,
       isLoading,
       lastUpdatedAt,
       refresh: load,
     }),
-    [data, statuses, fundingLeaders, error, isLoading, lastUpdatedAt, load],
+    [data, statuses, fundingLeaders, fundingSettlements, error, isLoading, lastUpdatedAt, load],
   );
 }

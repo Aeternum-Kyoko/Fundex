@@ -84,6 +84,8 @@ class MarketEngine:
                 await self.history_store.save_opportunities(opportunities)
                 await self._prune_if_due()
                 await self.telegram_notifier.notify(opportunities)
+                if await self._daily_summary_ready():
+                    await self.telegram_notifier.notify_daily_summary(all_snapshots, opportunities)
                 duration_ms = (datetime.now(timezone.utc) - started_at).total_seconds() * 1000
                 self._metrics["adapters"][adapter.exchange] = {
                     "runs": int(self._metrics["adapters"].get(adapter.exchange, {}).get("runs", 0)) + 1,
@@ -184,3 +186,13 @@ class MarketEngine:
                     snapshot_count=0,
                 )
             )
+
+    async def _daily_summary_ready(self) -> bool:
+        statuses = await self.store.get_statuses()
+        expected = set(self.settings.enabled_exchange_names)
+        healthy = {
+            status.exchange
+            for status in statuses
+            if status.exchange in expected and status.healthy and status.snapshot_count > 0
+        }
+        return expected.issubset(healthy)

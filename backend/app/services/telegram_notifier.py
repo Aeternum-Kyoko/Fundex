@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from httpx import AsyncClient
 
@@ -43,6 +45,24 @@ class AlertTransitionBatch:
     signature: str
 
 
+@dataclass
+class TelegramDailySummaryBatch:
+    message: str
+    signature: str
+    local_date: str
+    summary_key: str
+    summary_label: str
+
+
+@dataclass(frozen=True)
+class SummarySchedule:
+    key: str
+    label: str
+    hour: int
+    minute: int
+    enabled: bool
+
+
 class TelegramNotifier:
     def __init__(self, client: AsyncClient, settings: Settings, history_store: HistoryStore) -> None:
         self.client = client
@@ -51,12 +71,16 @@ class TelegramNotifier:
         self.command_service = TelegramCommandService(history_store)
         self._last_sent_signature: str | None = None
         self._last_sent_at: datetime | None = None
+        self._last_summary_signatures: dict[str, str] = {}
+        self._last_summary_at: dict[str, datetime] = {}
         self._last_error: str | None = None
         self._update_offset: int | None = None
+        self._summary_lock = asyncio.Lock()
         self._metrics: dict[str, int] = {
             "notifications_sent": 0,
             "entered_symbols_sent": 0,
             "exited_symbols_sent": 0,
+            "daily_summaries_sent": 0,
             "command_replies_sent": 0,
             "update_polls": 0,
             "update_errors": 0,
@@ -84,6 +108,23 @@ class TelegramNotifier:
             "cooldown_minutes": self.settings.telegram_cooldown_minutes,
             "poll_interval_seconds": self.settings.telegram_poll_interval_seconds,
             "last_sent_at": self._last_sent_at.isoformat() if self._last_sent_at else None,
+            "daily_summary_enabled": self.settings.telegram_daily_summary_enabled,
+            "daily_summary_timezone": self.settings.telegram_daily_summary_timezone,
+            "daily_summary_top_n": self.settings.telegram_daily_summary_top_n,
+            "summary_schedules": [
+                {
+                    "key": schedule.key,
+                    "label": schedule.label,
+                    "enabled": schedule.enabled and self.settings.telegram_daily_summary_enabled,
+                    "hour": schedule.hour,
+                    "minute": schedule.minute,
+                    "last_sent_at": self._last_summary_at.get(schedule.key).isoformat()
+                    if self._last_summary_at.get(schedule.key)
+                    else None,
+                    "last_signature": self._last_summary_signatures.get(schedule.key),
+                }
+                for schedule in self._summary_schedules()
+            ],
             "last_error": self._last_error,
             "last_signature": self._last_sent_signature,
             "update_offset": self._update_offset,
@@ -92,6 +133,19 @@ class TelegramNotifier:
 
     def preview(self, opportunities: list[ArbitrageOpportunity]) -> TelegramAlertBatch | None:
         return self._build_preview_batch(opportunities)
+
+    async def preview_daily_summary(
+        self,
+        snapshots: list[FundingSnapshot],
+        opportunities: list[ArbitrageOpportunity],
+        summary_key: str | None = None,
+    ) -> TelegramDailySummaryBatch | None:
+        return await self._build_daily_summary_batch(
+            snapshots,
+            opportunities,
+            schedule=self._resolve_summary_schedule(summary_key),
+            ignore_schedule=True,
+        )
 
     async def discover_chats(self) -> list[dict[str, Any]]:
         payload = await self._get_updates()
@@ -150,6 +204,45 @@ class TelegramNotifier:
             self._last_error = str(exc)
             logger.exception("Telegram notification send failed")
 
+    async def notify_daily_summary(
+        self,
+        snapshots: list[FundingSnapshot],
+        opportunities: list[ArbitrageOpportunity],
+    ) -> None:
+        if not self.enabled or not self.configured or not self.settings.telegram_daily_summary_enabled:
+            return
+
+        async with self._summary_lock:
+            chat_ids = await self.history_store.get_alert_enabled_chat_ids(self.settings.resolved_telegram_chat_ids)
+            if not chat_ids:
+                return
+
+            for schedule in self._summary_schedules():
+                if not schedule.enabled:
+                    continue
+
+                batch = await self._build_daily_summary_batch(snapshots, opportunities, schedule=schedule)
+                if batch is None:
+                    continue
+
+                try:
+                    await self._send_text(batch.message, chat_ids=chat_ids)
+                    sent_at = datetime.now(timezone.utc)
+                    await self.history_store.mark_daily_summary_sent(batch.local_date, sent_at, summary_key=batch.summary_key)
+                    self._last_summary_signatures[batch.summary_key] = batch.signature
+                    self._last_summary_at[batch.summary_key] = sent_at
+                    self._metrics["daily_summaries_sent"] += 1
+                    self._last_error = None
+                    logger.info(
+                        "Sent Telegram %s to %s chats for %s",
+                        batch.summary_label.lower(),
+                        len(chat_ids),
+                        batch.local_date,
+                    )
+                except Exception as exc:  # pragma: no cover
+                    self._last_error = str(exc)
+                    logger.exception("Telegram scheduled summary send failed")
+
     async def send_test_message(self, text: str | None = None) -> dict[str, Any]:
         if not self.enabled or not self.configured:
             return {"sent": False, "reason": "Telegram is not configured."}
@@ -192,6 +285,36 @@ class TelegramNotifier:
             "sent": True,
             "chat_ids": self.settings.resolved_telegram_chat_ids,
             "message": message,
+        }
+
+    async def send_daily_summary_now(
+        self,
+        snapshots: list[FundingSnapshot],
+        opportunities: list[ArbitrageOpportunity],
+        summary_key: str | None = None,
+    ) -> dict[str, Any]:
+        batch = await self._build_daily_summary_batch(
+            snapshots,
+            opportunities,
+            schedule=self._resolve_summary_schedule(summary_key),
+            ignore_schedule=True,
+        )
+        if batch is None:
+            return {"sent": False, "reason": "No daily summary content is available right now."}
+
+        await self._send_text(batch.message)
+        sent_at = datetime.now(timezone.utc)
+        await self.history_store.mark_daily_summary_sent(batch.local_date, sent_at, summary_key=batch.summary_key)
+        self._last_summary_signatures[batch.summary_key] = batch.signature
+        self._last_summary_at[batch.summary_key] = sent_at
+        self._metrics["daily_summaries_sent"] += 1
+        return {
+            "sent": True,
+            "chat_ids": self.settings.resolved_telegram_chat_ids,
+            "message": batch.message,
+            "local_date": batch.local_date,
+            "summary_key": batch.summary_key,
+            "summary_label": batch.summary_label,
         }
 
     async def process_updates(self, snapshots: list[FundingSnapshot], opportunities: list[ArbitrageOpportunity]) -> dict[str, Any]:
@@ -313,6 +436,148 @@ class TelegramNotifier:
             if not self._alert_quality_failures(opportunity)
         ]
         return sorted(ranked, key=lambda candidate: self._sort_key(candidate.opportunity))[: self.settings.telegram_top_n]
+
+    async def _build_daily_summary_batch(
+        self,
+        snapshots: list[FundingSnapshot],
+        opportunities: list[ArbitrageOpportunity],
+        *,
+        schedule: SummarySchedule | None = None,
+        ignore_schedule: bool = False,
+    ) -> TelegramDailySummaryBatch | None:
+        if not snapshots and not opportunities:
+            return None
+
+        resolved_schedule = schedule or self._summary_schedules()[0]
+
+        try:
+            summary_tz = ZoneInfo(self.settings.telegram_daily_summary_timezone)
+        except Exception:
+            summary_tz = timezone.utc
+
+        now_utc = datetime.now(timezone.utc)
+        now_local = now_utc.astimezone(summary_tz)
+        local_date = now_local.date().isoformat()
+        scheduled_time = now_local.replace(
+            hour=resolved_schedule.hour,
+            minute=resolved_schedule.minute,
+            second=0,
+            microsecond=0,
+        )
+
+        if not ignore_schedule and now_local < scheduled_time:
+            return None
+
+        existing_state = await self.history_store.get_daily_summary_state(resolved_schedule.key)
+        if not ignore_schedule and existing_state and existing_state.get("last_sent_local_date") == local_date:
+            return None
+
+        top_n = max(1, self.settings.telegram_daily_summary_top_n)
+        sorted_snapshots = [snapshot for snapshot in snapshots if snapshot.next_funding_time is not None]
+        top_positive = sorted(snapshots, key=lambda item: item.funding_rate, reverse=True)[:top_n]
+        top_negative = sorted(snapshots, key=lambda item: item.funding_rate)[:top_n]
+        best_spreads = sorted(opportunities, key=lambda item: (-item.spread_rate, -item.net_apr_percent, item.canonical_symbol))[:top_n]
+        upcoming_expiries = sorted(
+            sorted_snapshots,
+            key=lambda item: (item.next_funding_time or datetime.max.replace(tzinfo=timezone.utc), -abs(item.funding_rate)),
+        )[:top_n]
+
+        if not top_positive and not top_negative and not best_spreads and not upcoming_expiries:
+            return None
+
+        def snapshot_line(snapshot: FundingSnapshot) -> str:
+            return (
+                f"{snapshot.canonical_symbol} ({self.command_service._display_name(snapshot.exchange)}) - "
+                f"{snapshot.funding_rate * 100:.3f}%"
+            )
+
+        def spread_line(opportunity: ArbitrageOpportunity) -> str:
+            return (
+                f"{opportunity.canonical_symbol} - spread {opportunity.spread_rate * 100:.3f}% | "
+                f"long {opportunity.long_leg.display_name} | short {opportunity.short_leg.display_name} | "
+                f"net APR {opportunity.net_apr_percent:.2f}%"
+            )
+
+        def expiry_line(snapshot: FundingSnapshot) -> str:
+            return (
+                f"{snapshot.canonical_symbol} ({self.command_service._display_name(snapshot.exchange)}) - "
+                f"{format_countdown(snapshot.next_funding_time, now_utc)}"
+            )
+
+        positive_lines = [snapshot_line(snapshot) for snapshot in top_positive] or ["No positive funding leaders right now."]
+        negative_lines = [snapshot_line(snapshot) for snapshot in top_negative] or ["No negative funding leaders right now."]
+        spread_lines = [spread_line(opportunity) for opportunity in best_spreads] or ["No live spreads right now."]
+        expiry_lines = [expiry_line(snapshot) for snapshot in upcoming_expiries] or ["No upcoming funding events right now."]
+
+        parts = [
+            f"<b>{resolved_schedule.label}</b>",
+            "",
+            f"Date - {local_date}",
+            f"Timezone - {self.settings.telegram_daily_summary_timezone}",
+            "",
+            "<b>Top Positive Funding</b>",
+            *positive_lines,
+            "",
+            "<b>Top Negative Funding</b>",
+            *negative_lines,
+            "",
+            "<b>Best Spreads</b>",
+            *spread_lines,
+            "",
+            "<b>Upcoming Funding Expiries</b>",
+            *expiry_lines,
+        ]
+
+        signature = "|".join(
+            [
+                local_date,
+                resolved_schedule.key,
+                ",".join(f"{item.exchange}:{item.exchange_symbol}" for item in top_positive),
+                ",".join(f"{item.exchange}:{item.exchange_symbol}" for item in top_negative),
+                ",".join(item.canonical_symbol for item in best_spreads),
+                ",".join(f"{item.exchange}:{item.exchange_symbol}" for item in upcoming_expiries),
+            ]
+        )
+
+        return TelegramDailySummaryBatch(
+            message="\n".join(parts),
+            signature=signature,
+            local_date=local_date,
+            summary_key=resolved_schedule.key,
+            summary_label=resolved_schedule.label,
+        )
+
+    def _summary_schedules(self) -> list[SummarySchedule]:
+        return [
+            SummarySchedule(
+                key="morning",
+                label="Morning Summary",
+                hour=self.settings.telegram_morning_summary_hour,
+                minute=self.settings.telegram_morning_summary_minute,
+                enabled=self.settings.telegram_morning_summary_enabled,
+            ),
+            SummarySchedule(
+                key="evening",
+                label="Evening Summary",
+                hour=self.settings.telegram_evening_summary_hour,
+                minute=self.settings.telegram_evening_summary_minute,
+                enabled=self.settings.telegram_evening_summary_enabled,
+            ),
+            SummarySchedule(
+                key="night",
+                label="Night Summary",
+                hour=self.settings.telegram_night_summary_hour,
+                minute=self.settings.telegram_night_summary_minute,
+                enabled=self.settings.telegram_night_summary_enabled,
+            ),
+        ]
+
+    def _resolve_summary_schedule(self, summary_key: str | None) -> SummarySchedule | None:
+        schedules = self._summary_schedules()
+        if not summary_key:
+            return schedules[0]
+        normalized = summary_key.strip().lower()
+        return next((schedule for schedule in schedules if schedule.key == normalized), schedules[0])
 
     def _alert_quality_failures(self, opportunity: ArbitrageOpportunity) -> list[str]:
         reasons: list[str] = []

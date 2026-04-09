@@ -1,5 +1,6 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { FundingLeadersPanel } from "./components/FundingLeadersPanel";
+import { FundingSettlementBoard } from "./components/FundingSettlementBoard";
 import { FundingLeadersSkeleton, OpportunityTableSkeleton } from "./components/LoadingSkeletons";
 import { OpportunityInspector } from "./components/OpportunityInspector";
 import { OpportunityTable } from "./components/OpportunityTable";
@@ -174,7 +175,8 @@ export function App() {
   const [recentAlerts, setRecentAlerts] = useState<AlertEvent[]>(() => readAlertHistory());
   const recentAlertsRef = useRef(recentAlerts);
 
-  const { data, statuses, fundingLeaders, error, isLoading, lastUpdatedAt, refresh } = useMarketFeed(refreshIntervalMs);
+  const { data, statuses, fundingLeaders, fundingSettlements, error, isLoading, lastUpdatedAt, refresh } =
+    useMarketFeed(refreshIntervalMs);
   const deferredSearch = useDeferredValue(search);
 
   const fundingLeaderSymbols = useMemo(
@@ -511,6 +513,8 @@ export function App() {
           onTogglePin={toggleWatchlist}
         />
       )}
+
+      <FundingSettlementBoard items={fundingSettlements} nowTimestamp={nowTimestamp} onOpenSymbol={openOverviewBySymbol} />
 
       <section className="phase-three-grid">
         <section className="overview-card">

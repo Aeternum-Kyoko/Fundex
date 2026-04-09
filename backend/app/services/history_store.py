@@ -90,6 +90,12 @@ class HistoryStore:
                     last_combined_oi_usd REAL,
                     last_reason TEXT
                 );
+
+                CREATE TABLE IF NOT EXISTS telegram_daily_summary_state (
+                    summary_key TEXT PRIMARY KEY,
+                    last_sent_local_date TEXT NOT NULL,
+                    last_sent_at TEXT NOT NULL
+                );
                 """
             )
 
@@ -308,6 +314,57 @@ class HistoryStore:
                 (chat_id,),
             ).fetchall()
         return [row["canonical_symbol"] for row in rows]
+
+    async def get_daily_summary_state(self, summary_key: str = "default") -> dict[str, str] | None:
+        async with self._lock:
+            return await asyncio.to_thread(self._get_daily_summary_state_sync, summary_key)
+
+    def _get_daily_summary_state_sync(self, summary_key: str) -> dict[str, str] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT summary_key, last_sent_local_date, last_sent_at
+                FROM telegram_daily_summary_state
+                WHERE summary_key = ?
+                """,
+                (summary_key,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "summary_key": row["summary_key"],
+            "last_sent_local_date": row["last_sent_local_date"],
+            "last_sent_at": row["last_sent_at"],
+        }
+
+    async def mark_daily_summary_sent(
+        self,
+        local_date: str,
+        sent_at: datetime | None = None,
+        summary_key: str = "default",
+    ) -> None:
+        async with self._lock:
+            await asyncio.to_thread(self._mark_daily_summary_sent_sync, summary_key, local_date, sent_at)
+
+    def _mark_daily_summary_sent_sync(
+        self,
+        summary_key: str,
+        local_date: str,
+        sent_at: datetime | None,
+    ) -> None:
+        resolved_sent_at = (sent_at or datetime.now(timezone.utc)).isoformat()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO telegram_daily_summary_state (summary_key, last_sent_local_date, last_sent_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(summary_key) DO UPDATE SET
+                    last_sent_local_date = excluded.last_sent_local_date,
+                    last_sent_at = excluded.last_sent_at
+                """,
+                (summary_key, local_date, resolved_sent_at),
+            )
+            connection.commit()
 
     async def prune_old_data(
         self,

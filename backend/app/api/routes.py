@@ -10,6 +10,8 @@ from fastapi.responses import StreamingResponse
 from app.models.execution import ExecutionPlanResponse
 from app.models.market import (
     FundingLeadersResponse,
+    FundingSettlementItem,
+    FundingSettlementResponse,
     FundingTrendsResponse,
     OpportunitiesResponse,
     OpportunityHistoryResponse,
@@ -67,6 +69,32 @@ async def exchange_funding_leaders(request: Request, limit: int = 5) -> FundingL
         limit=resolved_limit,
         exchanges_to_include=tuple(_enabled_exchanges(request)),
     )
+
+
+@router.get("/exchanges/funding-settlements", response_model=FundingSettlementResponse)
+async def exchange_funding_settlements(request: Request, limit: int = 12) -> FundingSettlementResponse:
+    snapshots = await request.app.state.market_store.get_snapshots()
+    now = datetime.now(timezone.utc)
+    resolved_limit = max(1, min(limit, 40))
+    items = [
+        FundingSettlementItem(
+            exchange=snapshot.exchange,
+            display_name=exchange_display_name(snapshot.exchange),
+            canonical_symbol=snapshot.canonical_symbol,
+            exchange_symbol=snapshot.exchange_symbol,
+            funding_rate=snapshot.funding_rate,
+            funding_interval_hours=snapshot.funding_interval_hours,
+            next_funding_time=snapshot.next_funding_time,
+            mark_price=snapshot.mark_price,
+            open_interest_usd=snapshot.open_interest_usd,
+            trade_url=exchange_trade_url(snapshot.exchange, snapshot.exchange_symbol),
+        )
+        for snapshot in sorted(
+            [item for item in snapshots if item.next_funding_time is not None and item.next_funding_time >= now],
+            key=lambda item: (item.next_funding_time or datetime.max.replace(tzinfo=timezone.utc), -abs(item.funding_rate), item.canonical_symbol, item.exchange),
+        )[:resolved_limit]
+    ]
+    return FundingSettlementResponse(total=len(items), items=items)
 
 
 @router.get("/exchanges/funding-trends", response_model=FundingTrendsResponse)
@@ -183,6 +211,29 @@ async def telegram_preview(request: Request) -> dict:
     }
 
 
+@router.get("/telegram/daily-summary-preview")
+async def telegram_daily_summary_preview(request: Request, summary_key: str | None = None) -> dict:
+    snapshots = await request.app.state.market_store.get_snapshots()
+    opportunities = build_opportunities(snapshots, request.app.state.settings)
+    batch = await request.app.state.telegram_notifier.preview_daily_summary(snapshots, opportunities, summary_key=summary_key)
+
+    if batch is None:
+        return {
+            "ready": False,
+            "message": None,
+            "local_date": None,
+        }
+
+    return {
+        "ready": True,
+        "message": batch.message,
+        "local_date": batch.local_date,
+        "summary_key": batch.summary_key,
+        "summary_label": batch.summary_label,
+        "signature": batch.signature,
+    }
+
+
 @router.get("/telegram/discover-chats")
 async def telegram_discover_chats(request: Request) -> dict:
     chats = await request.app.state.telegram_notifier.discover_chats()
@@ -200,6 +251,17 @@ async def telegram_test_send(request: Request) -> dict:
 @router.post("/telegram/demo-alert")
 async def telegram_demo_alert(request: Request) -> dict:
     return await request.app.state.telegram_notifier.send_demo_alert()
+
+
+@router.post("/telegram/send-daily-summary")
+async def telegram_send_daily_summary(request: Request, summary_key: str | None = None) -> dict:
+    snapshots = await request.app.state.market_store.get_snapshots()
+    opportunities = build_opportunities(snapshots, request.app.state.settings)
+    return await request.app.state.telegram_notifier.send_daily_summary_now(
+        snapshots,
+        opportunities,
+        summary_key=summary_key,
+    )
 
 
 @router.get("/opportunities/{canonical_symbol}/execution-plan", response_model=ExecutionPlanResponse)

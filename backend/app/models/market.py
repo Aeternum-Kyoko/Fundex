@@ -113,6 +113,24 @@ class FundingLeadersResponse(BaseModel):
     exchanges: list[ExchangeFundingLeaders]
 
 
+class FundingSettlementItem(BaseModel):
+    exchange: ExchangeName
+    display_name: str
+    canonical_symbol: str
+    exchange_symbol: str
+    funding_rate: float
+    funding_interval_hours: int
+    next_funding_time: datetime | None = None
+    mark_price: float | None = None
+    open_interest_usd: float | None = None
+    trade_url: str
+
+
+class FundingSettlementResponse(BaseModel):
+    total: int
+    items: list[FundingSettlementItem]
+
+
 class FundingTrendPoint(BaseModel):
     recorded_at: datetime
     funding_rate: float
