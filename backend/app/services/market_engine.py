@@ -9,6 +9,7 @@ from httpx import AsyncClient
 
 from app.adapters.base import ExchangeAdapter
 from app.adapters.binance import BinanceAdapter
+from app.adapters.coindcx import CoinDCXAdapter
 from app.adapters.delta import DeltaAdapter
 from app.core.config import Settings
 from app.models.market import ExchangeStatus
@@ -40,6 +41,8 @@ class MarketEngine:
             self.adapters.append(BinanceAdapter(self.client, settings))
         if settings.delta_enabled:
             self.adapters.append(DeltaAdapter(self.client, settings))
+        if settings.coindcx_enabled:
+            self.adapters.append(CoinDCXAdapter(self.client, settings))
 
     async def start(self) -> None:
         await self._seed_statuses()
@@ -116,7 +119,7 @@ class MarketEngine:
     async def _run_telegram_bot(self) -> None:
         while True:
             try:
-                snapshots = await self.store.get_snapshots(include_exchanges={"binance", "delta"})
+                snapshots = await self.store.get_snapshots()
                 opportunities = build_opportunities(snapshots, self.settings)
                 result = await self.telegram_notifier.process_updates(snapshots, opportunities)
                 self._metrics["telegram"]["bot_polls"] = int(self._metrics["telegram"]["bot_polls"]) + 1
@@ -158,6 +161,12 @@ class MarketEngine:
             (
                 "delta",
                 self.settings.delta_enabled,
+                True,
+                None,
+            ),
+            (
+                "coindcx",
+                self.settings.coindcx_enabled,
                 True,
                 None,
             ),

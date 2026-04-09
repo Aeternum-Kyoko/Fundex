@@ -5,6 +5,14 @@ from datetime import datetime, timedelta, timezone
 from app.models.market import ArbitrageOpportunity, FundingSnapshot, OpportunityLeg
 
 
+DISPLAY_NAMES = {
+    "binance": "Binance",
+    "delta": "Delta Exchange India",
+    "coindcx": "CoinDCX",
+    "coinswitch": "CoinSwitch",
+}
+
+
 def make_snapshot(
     *,
     exchange: str,
@@ -57,10 +65,17 @@ def make_opportunity(
     next_funding = now + timedelta(hours=1)
     spread = spread_rate if spread_rate is not None else short_rate - long_rate
 
+    def default_symbol(exchange: str) -> str:
+        if exchange == "delta":
+            return f"{base_asset}USD"
+        if exchange == "coindcx":
+            return f"B-{base_asset}_USDT"
+        return f"{base_asset}USDT"
+
     long_leg = OpportunityLeg(
         exchange=long_exchange,
-        display_name="Delta Exchange India" if long_exchange == "delta" else "Binance",
-        exchange_symbol=long_symbol or (f"{base_asset}USD" if long_exchange == "delta" else f"{base_asset}USDT"),
+        display_name=DISPLAY_NAMES.get(long_exchange, long_exchange.title()),
+        exchange_symbol=long_symbol or default_symbol(long_exchange),
         funding_rate=long_rate,
         mark_price=100.0,
         open_interest_usd=(combined_open_interest_usd or 0) / 2 if combined_open_interest_usd else None,
@@ -71,8 +86,8 @@ def make_opportunity(
     )
     short_leg = OpportunityLeg(
         exchange=short_exchange,
-        display_name="Binance" if short_exchange == "binance" else "Delta Exchange India",
-        exchange_symbol=short_symbol or (f"{base_asset}USDT" if short_exchange == "binance" else f"{base_asset}USD"),
+        display_name=DISPLAY_NAMES.get(short_exchange, short_exchange.title()),
+        exchange_symbol=short_symbol or default_symbol(short_exchange),
         funding_rate=short_rate,
         mark_price=100.2,
         open_interest_usd=(combined_open_interest_usd or 0) / 2 if combined_open_interest_usd else None,

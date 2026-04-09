@@ -34,9 +34,10 @@ export function OpportunityTable({
           <thead>
             <tr>
               <th className="sticky-column">Coin</th>
-              <th>Binance FR</th>
-              <th>Delta FR</th>
               <th>Lower Funding</th>
+              <th>Lower Rate</th>
+              <th>Higher Funding</th>
+              <th>Higher Rate</th>
               <th>Next Funding</th>
               <th>Spread</th>
               <th>Net APR</th>
@@ -47,8 +48,6 @@ export function OpportunityTable({
           </thead>
           <tbody>
             {opportunities.map((opportunity) => {
-              const binanceLeg = opportunity.long_leg.exchange === "binance" ? opportunity.long_leg : opportunity.short_leg;
-              const deltaLeg = opportunity.long_leg.exchange === "delta" ? opportunity.long_leg : opportunity.short_leg;
               const active = opportunity.canonical_symbol === selectedSymbol;
               const watched = watchlist.includes(opportunity.canonical_symbol);
               const nextFunding = getNextFundingTime(opportunity);
@@ -98,20 +97,20 @@ export function OpportunityTable({
                     </div>
                   </td>
                   <td>
-                    <div className="table-pill binance-pill">Binance</div>
-                    <div className={binanceLeg.funding_rate >= 0 ? "positive" : "negative"}>
-                      {formatPct(binanceLeg.funding_rate * 100, 3)}
-                    </div>
-                  </td>
-                  <td>
-                    <div className="table-pill delta-pill">Delta</div>
-                    <div className={deltaLeg.funding_rate >= 0 ? "positive" : "negative"}>
-                      {formatPct(deltaLeg.funding_rate * 100, 3)}
-                    </div>
-                  </td>
-                  <td>
+                    <div className="table-pill">{opportunity.long_leg.display_name}</div>
                     <strong>{opportunity.long_leg.display_name}</strong>
                     <div className="subtle">{opportunity.long_leg.exchange_symbol}</div>
+                  </td>
+                  <td className={opportunity.long_leg.funding_rate >= 0 ? "positive" : "negative"}>
+                    {formatPct(opportunity.long_leg.funding_rate * 100, 3)}
+                  </td>
+                  <td>
+                    <div className="table-pill">{opportunity.short_leg.display_name}</div>
+                    <strong>{opportunity.short_leg.display_name}</strong>
+                    <div className="subtle">{opportunity.short_leg.exchange_symbol}</div>
+                  </td>
+                  <td className={opportunity.short_leg.funding_rate >= 0 ? "positive" : "negative"}>
+                    {formatPct(opportunity.short_leg.funding_rate * 100, 3)}
                   </td>
                   <td>
                     <strong>{formatCountdown(nextFunding, nowTimestamp)}</strong>
@@ -136,8 +135,6 @@ export function OpportunityTable({
 
       <div className="mobile-opportunity-list">
         {opportunities.map((opportunity) => {
-          const binanceLeg = opportunity.long_leg.exchange === "binance" ? opportunity.long_leg : opportunity.short_leg;
-          const deltaLeg = opportunity.long_leg.exchange === "delta" ? opportunity.long_leg : opportunity.short_leg;
           const watched = watchlist.includes(opportunity.canonical_symbol);
           const active = opportunity.canonical_symbol === selectedSymbol;
           const nextFunding = getNextFundingTime(opportunity);
@@ -160,15 +157,15 @@ export function OpportunityTable({
 
                 <div className="mobile-card-grid">
                   <div>
-                    <span className="subtle">Binance FR</span>
-                    <strong className={binanceLeg.funding_rate >= 0 ? "positive" : "negative"}>
-                      {formatPct(binanceLeg.funding_rate * 100, 3)}
+                    <span className="subtle">{opportunity.long_leg.display_name}</span>
+                    <strong className={opportunity.long_leg.funding_rate >= 0 ? "positive" : "negative"}>
+                      {formatPct(opportunity.long_leg.funding_rate * 100, 3)}
                     </strong>
                   </div>
                   <div>
-                    <span className="subtle">Delta FR</span>
-                    <strong className={deltaLeg.funding_rate >= 0 ? "positive" : "negative"}>
-                      {formatPct(deltaLeg.funding_rate * 100, 3)}
+                    <span className="subtle">{opportunity.short_leg.display_name}</span>
+                    <strong className={opportunity.short_leg.funding_rate >= 0 ? "positive" : "negative"}>
+                      {formatPct(opportunity.short_leg.funding_rate * 100, 3)}
                     </strong>
                   </div>
                   <div>

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from app.services.history_store import HistoryStore
 from app.services.telegram_commands import TelegramCommandService
-from tests.test_helpers import make_opportunity
+from tests.test_helpers import make_opportunity, make_snapshot
 
 
 class TelegramCommandTests(unittest.IsolatedAsyncioTestCase):
@@ -41,3 +41,55 @@ class TelegramCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(match)
         self.assertIsNotNone(error)
         self.assertIn("full symbol", error or "")
+
+    async def test_coindcx_command_returns_a_coindcx_section(self) -> None:
+        snapshots = [
+            make_snapshot(exchange="coindcx", canonical_symbol="BTC-USDT-PERP", funding_rate=0.003, exchange_symbol="B-BTC_USDT"),
+            make_snapshot(exchange="coindcx", canonical_symbol="ETH-USDT-PERP", funding_rate=-0.002, exchange_symbol="B-ETH_USDT"),
+        ]
+
+        reply = await self.service.build_reply("chat-1", "/coindcx", snapshots, self.opportunities)
+
+        self.assertIn("CoinDCX", reply)
+        self.assertIn("BTC-USDT-PERP", reply)
+
+    async def test_compare_command_shows_all_exchange_sections(self) -> None:
+        snapshots = [
+            make_snapshot(exchange="binance", canonical_symbol="BTC-USDT-PERP", funding_rate=0.001, exchange_symbol="BTCUSDT"),
+            make_snapshot(exchange="delta", canonical_symbol="BTC-USDT-PERP", funding_rate=-0.0012, exchange_symbol="BTCUSD"),
+            make_snapshot(exchange="coindcx", canonical_symbol="BTC-USDT-PERP", funding_rate=0.0007, exchange_symbol="B-BTC_USDT"),
+        ]
+        opportunities = [
+            make_opportunity(
+                canonical_symbol="BTC-USDT-PERP",
+                long_exchange="delta",
+                short_exchange="binance",
+                long_symbol="BTCUSD",
+                short_symbol="BTCUSDT",
+            )
+        ]
+
+        reply = await self.service.build_reply("chat-1", "/compare BTC", snapshots, opportunities)
+
+        self.assertIn("Exchange comparison", reply)
+        self.assertIn("Binance", reply)
+        self.assertIn("Delta Exchange India", reply)
+        self.assertIn("CoinDCX", reply)
+        self.assertIn("Best live pair", reply)
+
+    async def test_status_command_reports_watchlist_and_alerts(self) -> None:
+        await self.store.add_watch_symbol("chat-1", "BTC-USDT-PERP")
+        await self.store.set_alerts_enabled("chat-1", False)
+
+        reply = await self.service.build_reply("chat-1", "/status", [], self.opportunities)
+
+        self.assertIn("Your bot status", reply)
+        self.assertIn("off", reply)
+        self.assertIn("BTC-USDT-PERP", reply)
+
+    async def test_help_lists_compare_and_status_commands(self) -> None:
+        reply = await self.service.build_reply("chat-1", "/help", [], self.opportunities)
+
+        self.assertIn("/compare BTC", reply)
+        self.assertIn("/status", reply)
+        self.assertIn("/exchanges", reply)

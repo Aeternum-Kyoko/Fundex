@@ -188,7 +188,14 @@ export function App() {
       ),
     [fundingLeaders],
   );
-  const { series: fundingTrendSeries, loading: fundingTrendLoading } = useFundingTrends(fundingLeaderSymbols);
+  const activeExchanges = useMemo(
+    () => (data.exchanges_in_backend.length ? data.exchanges_in_backend : statuses.map((status) => status.exchange)),
+    [data.exchanges_in_backend, statuses],
+  );
+  const { series: fundingTrendSeries, loading: fundingTrendLoading } = useFundingTrends(
+    fundingLeaderSymbols,
+    activeExchanges,
+  );
 
   useEffect(() => {
     recentAlertsRef.current = recentAlerts;
@@ -436,7 +443,7 @@ export function App() {
           <h1>Dark Funding Monitor</h1>
           <p className="lede">
             Phase 4 turns the dashboard into an operations desk with live feed controls, browser notifications, alert history,
-            and one-click CSV export for Binance and Delta monitoring.
+            and one-click CSV export across every active exchange in the monitor.
           </p>
         </div>
 
@@ -731,7 +738,7 @@ export function App() {
           <div className="panel-header">
             <div>
               <p className="eyebrow">Monitor Table</p>
-              <h2>{visibleOpportunities.length} live Binance vs Delta comparisons</h2>
+              <h2>{visibleOpportunities.length} live funding comparisons</h2>
               <div className="subtle">
                 Search inside the table, sort by spread or funding timing, export snapshots, and open any row for a full-screen overview.
               </div>
@@ -744,7 +751,11 @@ export function App() {
           <div className="table-toolbar">
             <label className="control search-control">
               <span className="subtle">Search</span>
-              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search BTC, ETH, Binance, Delta..." />
+              <input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search BTC, ETH, Binance, Delta, CoinDCX..."
+              />
             </label>
 
             <label className="control">

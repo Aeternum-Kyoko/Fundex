@@ -15,6 +15,10 @@ from app.services.funding_leaders import build_funding_leaders
 router = APIRouter()
 
 
+def _enabled_exchanges(request: Request) -> list[str]:
+    return request.app.state.settings.enabled_exchange_names
+
+
 @router.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok", "phase": "phase-4-monitor"}
@@ -33,12 +37,13 @@ async def exchange_status(request: Request) -> list[dict]:
 
 @router.get("/arbitrage-opportunities", response_model=OpportunitiesResponse)
 async def arbitrage_opportunities(request: Request) -> OpportunitiesResponse:
-    snapshots = await request.app.state.market_store.get_snapshots(include_exchanges={"binance", "delta"})
+    snapshots = await request.app.state.market_store.get_snapshots()
     opportunities = build_opportunities(snapshots, request.app.state.settings)
+    enabled_exchanges = _enabled_exchanges(request)
 
     return OpportunitiesResponse(
         total=len(opportunities),
-        exchanges_in_backend=["binance", "delta"],
+        exchanges_in_backend=enabled_exchanges,
         frontend_optional_exchanges=[],
         opportunities=opportunities,
     )
@@ -46,20 +51,25 @@ async def arbitrage_opportunities(request: Request) -> OpportunitiesResponse:
 
 @router.get("/exchanges/funding-leaders", response_model=FundingLeadersResponse)
 async def exchange_funding_leaders(request: Request, limit: int = 5) -> FundingLeadersResponse:
-    snapshots = await request.app.state.market_store.get_snapshots(include_exchanges={"binance", "delta"})
+    snapshots = await request.app.state.market_store.get_snapshots()
     resolved_limit = max(1, min(limit, 20))
-    return build_funding_leaders(snapshots, limit=resolved_limit)
+    return build_funding_leaders(
+        snapshots,
+        limit=resolved_limit,
+        exchanges_to_include=tuple(_enabled_exchanges(request)),
+    )
 
 
 @router.get("/exchanges/funding-trends", response_model=FundingTrendsResponse)
 async def exchange_funding_trends(
     request: Request,
     symbols: str,
-    exchanges: str = "binance,delta",
+    exchanges: str | None = None,
     limit: int = 16,
 ) -> FundingTrendsResponse:
     symbol_list = [item.strip().upper() for item in symbols.split(",") if item.strip()]
-    exchange_list = [item.strip().lower() for item in exchanges.split(",") if item.strip()]
+    raw_exchanges = exchanges or ",".join(_enabled_exchanges(request))
+    exchange_list = [item.strip().lower() for item in raw_exchanges.split(",") if item.strip()]
     resolved_limit = max(2, min(limit, 32))
     series = await request.app.state.history_store.get_funding_trends(symbol_list, exchange_list, resolved_limit)
     return FundingTrendsResponse(total_series=len(series), series=series)
@@ -72,11 +82,12 @@ async def stream_opportunities(request: Request) -> StreamingResponse:
             if await request.is_disconnected():
                 break
 
-            snapshots = await request.app.state.market_store.get_snapshots(include_exchanges={"binance", "delta"})
+            snapshots = await request.app.state.market_store.get_snapshots()
             opportunities = build_opportunities(snapshots, request.app.state.settings)
+            enabled_exchanges = _enabled_exchanges(request)
             payload = OpportunitiesResponse(
                 total=len(opportunities),
-                exchanges_in_backend=["binance", "delta"],
+                exchanges_in_backend=enabled_exchanges,
                 frontend_optional_exchanges=[],
                 opportunities=opportunities,
             )
@@ -101,7 +112,7 @@ async def telegram_status(request: Request) -> dict:
 
 @router.get("/telegram/preview")
 async def telegram_preview(request: Request) -> dict:
-    snapshots = await request.app.state.market_store.get_snapshots(include_exchanges={"binance", "delta"})
+    snapshots = await request.app.state.market_store.get_snapshots()
     opportunities = build_opportunities(snapshots, request.app.state.settings)
     batch = request.app.state.telegram_notifier.preview(opportunities)
 
@@ -147,7 +158,7 @@ async def execution_plan(
     holding_periods: int = 3,
     basis_risk_buffer_percent: float = 0.35,
 ) -> ExecutionPlanResponse:
-    snapshots = await request.app.state.market_store.get_snapshots(include_exchanges={"binance", "delta"})
+    snapshots = await request.app.state.market_store.get_snapshots()
     opportunities = build_opportunities(snapshots, request.app.state.settings)
     opportunity = next((item for item in opportunities if item.canonical_symbol == canonical_symbol), None)
     if opportunity is None:

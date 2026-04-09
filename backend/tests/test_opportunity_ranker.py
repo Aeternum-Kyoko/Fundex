@@ -39,3 +39,18 @@ class OpportunityRankerTests(unittest.TestCase):
         self.assertGreater(opportunity.max_leg_age_seconds or 0, 60)
         self.assertLess(opportunity.confidence_score, 1.0)
         self.assertTrue(any("stale" in warning.lower() for warning in opportunity.warnings))
+
+    def test_build_opportunities_considers_coindcx_when_it_has_the_extreme_rate(self) -> None:
+        snapshots = [
+            make_snapshot(exchange="binance", funding_rate=0.0015, exchange_symbol="ETHUSDT"),
+            make_snapshot(exchange="delta", funding_rate=-0.001, exchange_symbol="ETHUSD"),
+            make_snapshot(exchange="coindcx", funding_rate=0.0025, exchange_symbol="B-ETH_USDT"),
+        ]
+
+        opportunities = build_opportunities(snapshots, self.settings)
+
+        self.assertEqual(len(opportunities), 1)
+        opportunity = opportunities[0]
+        self.assertEqual(opportunity.long_leg.exchange, "delta")
+        self.assertEqual(opportunity.short_leg.exchange, "coindcx")
+        self.assertAlmostEqual(opportunity.spread_rate, 0.0035)

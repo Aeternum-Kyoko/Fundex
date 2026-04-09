@@ -156,7 +156,7 @@ class TelegramNotifier:
 
         message = text or (
             "<b>ArbRadar Telegram bot is connected.</b>\n\n"
-            "You will receive alerts here when Binance vs Delta spread, confidence, liquidity, "
+            "You will receive alerts here when spread, confidence, liquidity, "
             "and freshness all meet the configured thresholds."
         )
         await self._send_text(message)

@@ -4,6 +4,8 @@ from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.models.market import ExchangeName
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
@@ -56,6 +58,19 @@ class Settings(BaseSettings):
         if self.telegram_chat_id and self.telegram_chat_id.strip():
             resolved.append(self.telegram_chat_id.strip())
         return list(dict.fromkeys(resolved))
+
+    @property
+    def enabled_exchange_names(self) -> list[ExchangeName]:
+        exchanges: list[ExchangeName] = []
+        if self.binance_enabled:
+            exchanges.append("binance")
+        if self.delta_enabled:
+            exchanges.append("delta")
+        if self.coindcx_enabled:
+            exchanges.append("coindcx")
+        if self.coinswitch_enabled and self.coinswitch_configured:
+            exchanges.append("coinswitch")
+        return exchanges
 
 
 @lru_cache

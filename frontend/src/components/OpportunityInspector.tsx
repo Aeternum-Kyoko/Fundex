@@ -50,6 +50,7 @@ export function OpportunityInspector({
   }
 
   const nextFunding = getNextFundingTime(opportunity);
+  const legs = [opportunity.long_leg, opportunity.short_leg];
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -150,38 +151,18 @@ export function OpportunityInspector({
                 <span className="subtle">Confidence</span>
                 <strong>{(opportunity.confidence_score * 100).toFixed(0)}/100</strong>
               </div>
-              <div>
-                <span className="subtle">Binance mark</span>
-                <strong>
-                  {opportunity.long_leg.exchange === "binance"
-                    ? formatUsd(opportunity.long_leg.mark_price)
-                    : formatUsd(opportunity.short_leg.mark_price)}
-                </strong>
-              </div>
-              <div>
-                <span className="subtle">Delta mark</span>
-                <strong>
-                  {opportunity.long_leg.exchange === "delta"
-                    ? formatUsd(opportunity.long_leg.mark_price)
-                    : formatUsd(opportunity.short_leg.mark_price)}
-                </strong>
-              </div>
-              <div>
-                <span className="subtle">Binance next funding</span>
-                <strong>
-                  {opportunity.long_leg.exchange === "binance"
-                    ? formatTimestamp(opportunity.long_leg.next_funding_time)
-                    : formatTimestamp(opportunity.short_leg.next_funding_time)}
-                </strong>
-              </div>
-              <div>
-                <span className="subtle">Delta next funding</span>
-                <strong>
-                  {opportunity.long_leg.exchange === "delta"
-                    ? formatTimestamp(opportunity.long_leg.next_funding_time)
-                    : formatTimestamp(opportunity.short_leg.next_funding_time)}
-                </strong>
-              </div>
+              {legs.map((leg) => (
+                <div key={`${leg.exchange}-mark`}>
+                  <span className="subtle">{leg.display_name} mark</span>
+                  <strong>{formatUsd(leg.mark_price)}</strong>
+                </div>
+              ))}
+              {legs.map((leg) => (
+                <div key={`${leg.exchange}-funding`}>
+                  <span className="subtle">{leg.display_name} next funding</span>
+                  <strong>{formatTimestamp(leg.next_funding_time)}</strong>
+                </div>
+              ))}
             </div>
           </section>
 

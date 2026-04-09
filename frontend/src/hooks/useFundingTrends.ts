@@ -3,13 +3,17 @@ import type { FundingTrendSeries, FundingTrendsResponse } from "../lib/types";
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "/api";
 
-export function useFundingTrends(symbols: string[], limit = 16) {
+export function useFundingTrends(symbols: string[], exchanges: string[], limit = 16) {
   const [series, setSeries] = useState<FundingTrendSeries[]>([]);
   const [loading, setLoading] = useState(false);
 
   const normalizedSymbols = useMemo(
     () => Array.from(new Set(symbols.map((symbol) => symbol.trim().toUpperCase()).filter(Boolean))).slice(0, 20),
     [symbols],
+  );
+  const normalizedExchanges = useMemo(
+    () => Array.from(new Set(exchanges.map((exchange) => exchange.trim().toLowerCase()).filter(Boolean))),
+    [exchanges],
   );
 
   useEffect(() => {
@@ -25,7 +29,7 @@ export function useFundingTrends(symbols: string[], limit = 16) {
       try {
         const params = new URLSearchParams({
           symbols: normalizedSymbols.join(","),
-          exchanges: "binance,delta",
+          exchanges: normalizedExchanges.join(","),
           limit: String(limit),
         });
         const response = await fetch(`${API_BASE}/exchanges/funding-trends?${params.toString()}`);
@@ -52,7 +56,7 @@ export function useFundingTrends(symbols: string[], limit = 16) {
     return () => {
       cancelled = true;
     };
-  }, [limit, normalizedSymbols]);
+  }, [limit, normalizedExchanges, normalizedSymbols]);
 
   return { series, loading };
 }

@@ -9,11 +9,18 @@ from app.services.links import exchange_display_name, exchange_trade_url
 def build_funding_leaders(
     snapshots: list[FundingSnapshot],
     limit: int = 5,
-    exchanges_to_include: tuple[str, ...] = ("binance", "delta"),
+    exchanges_to_include: tuple[str, ...] | None = None,
 ) -> FundingLeadersResponse:
     grouped: dict[str, list[FundingSnapshot]] = defaultdict(list)
     for snapshot in snapshots:
         grouped[snapshot.exchange].append(snapshot)
+
+    if exchanges_to_include is None:
+        exchanges_to_include = tuple(
+            exchange
+            for exchange in ("binance", "delta", "coindcx", "coinswitch")
+            if exchange in grouped
+        )
 
     exchanges: list[ExchangeFundingLeaders] = []
     for exchange in exchanges_to_include:

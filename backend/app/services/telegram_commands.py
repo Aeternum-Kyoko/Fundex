@@ -8,6 +8,14 @@ from app.services.history_store import HistoryStore
 from app.services.symbol_registry import build_symbol_aliases, normalize_symbol_query
 
 
+DISPLAY_NAMES = {
+    "binance": "Binance",
+    "delta": "Delta Exchange India",
+    "coindcx": "CoinDCX",
+    "coinswitch": "CoinSwitch",
+}
+
+
 def earliest_funding_time(opportunity: ArbitrageOpportunity) -> datetime | None:
     timestamps = [opportunity.long_leg.next_funding_time, opportunity.short_leg.next_funding_time]
     resolved = [timestamp for timestamp in timestamps if timestamp is not None]
@@ -59,8 +67,14 @@ class TelegramCommandService:
         normalized = raw_text.strip()
         upper = normalized.upper()
 
-        if upper in {"/START", "/HELP"}:
+        if upper in {"/START", "/HELP", "/COMMANDS"}:
             return self.help_text()
+
+        if upper == "/EXCHANGES":
+            return self._format_exchanges(snapshots)
+
+        if upper == "/STATUS":
+            return await self._format_status(chat_id)
 
         if upper == "/TOPPOSITIVE":
             return self._format_multi_exchange_funding(snapshots, positive=True)
@@ -73,6 +87,9 @@ class TelegramCommandService:
 
         if upper == "/DELTA":
             return self._format_single_exchange_funding(snapshots, "delta")
+
+        if upper == "/COINDCX":
+            return self._format_single_exchange_funding(snapshots, "coindcx")
 
         if upper.startswith("/WATCH "):
             symbol_query = normalized.split(maxsplit=1)[1].strip()
@@ -114,17 +131,24 @@ class TelegramCommandService:
             state = "on" if enabled else "off"
             return f"Automatic alerts are currently <b>{state}</b> for this chat."
 
+        if upper.startswith("/COMPARE"):
+            parts = normalized.split(maxsplit=1)
+            symbol_query = parts[1].strip() if len(parts) > 1 else ""
+            if not symbol_query:
+                return "Use /compare BTC or /compare SOL-USDT-PERP."
+            return self._format_compare_reply(symbol_query, snapshots, opportunities)
+
         if upper.startswith("/COIN"):
             parts = normalized.split(maxsplit=1)
             normalized = parts[1].strip() if len(parts) > 1 else ""
 
         if not normalized:
-            return "Send a coin symbol like BTC, ETH, SOL or use /coin BTC."
+            return "Send a coin symbol like BTC, ETH, SOL or use /coin BTC or /compare BTC."
 
         match, error = self.find_opportunity(normalized, opportunities)
         if match is None:
             return error or (
-                f"I could not find <b>{normalized.upper()}</b> in the current Binance vs Delta monitor.\n"
+                f"I could not find <b>{normalized.upper()}</b> in the current monitor.\n"
                 "Use an exact coin like BTC or ETH, or the full symbol like BTC-USDT-PERP."
             )
 
@@ -133,14 +157,20 @@ class TelegramCommandService:
     def help_text(self) -> str:
         return (
             "<b>ArbRadar bot commands</b>\n\n"
-            "/coin BTC - live Binance vs Delta view\n"
-            "/toppositive - top positive funding on both exchanges\n"
-            "/topnegative - top negative funding on both exchanges\n"
+            "/coin BTC - best live pair for a coin\n"
+            "/compare BTC - compare one coin across all active exchanges\n"
+            "/toppositive - top positive funding across active exchanges\n"
+            "/topnegative - top negative funding across active exchanges\n"
             "/binance - Binance positive and negative leaders\n"
             "/delta - Delta positive and negative leaders\n"
+            "/coindcx - CoinDCX positive and negative leaders\n"
+            "/exchanges - list active exchanges in the bot\n"
+            "/status - show your alert and watchlist status\n"
+            "/commands - show this help again\n"
             "/watch BTC - add a symbol to your watchlist\n"
             "/unwatch BTC - remove a symbol from your watchlist\n"
             "/watchlist - show your watchlist\n"
+            "/alerts - show alert status for this chat\n"
             "/alerts on - enable automatic alerts for this chat\n"
             "/alerts off - disable automatic alerts for this chat"
         )
@@ -195,9 +225,62 @@ class TelegramCommandService:
             )
 
         return None, (
-            f"I could not find <b>{normalized_query.uppercase}</b> in the current Binance vs Delta monitor.\n"
+            f"I could not find <b>{normalized_query.uppercase}</b> in the current monitor.\n"
             "Use an exact coin like BTC or ETH, or the full symbol like BTC-USDT-PERP."
         )
+
+    def find_canonical_symbol(
+        self,
+        query: str,
+        snapshots: list[FundingSnapshot],
+        opportunities: list[ArbitrageOpportunity],
+    ) -> tuple[str | None, str | None]:
+        match, error = self.find_opportunity(query, opportunities)
+        if match is not None:
+            return match.canonical_symbol, None
+
+        normalized_query = normalize_symbol_query(query)
+        if not normalized_query.compact:
+            return None, "Send a coin symbol like BTC, ETH, SOL or use /compare BTC."
+
+        exact_canonical = next(
+            (snapshot.canonical_symbol for snapshot in snapshots if snapshot.canonical_symbol.upper() == normalized_query.uppercase),
+            None,
+        )
+        if exact_canonical is not None:
+            return exact_canonical, None
+
+        exact_exchange = next(
+            (snapshot.canonical_symbol for snapshot in snapshots if snapshot.exchange_symbol.upper() == normalized_query.uppercase),
+            None,
+        )
+        if exact_exchange is not None:
+            return exact_exchange, None
+
+        matches = sorted(
+            {
+                snapshot.canonical_symbol
+                for snapshot in snapshots
+                if normalized_query.compact
+                in build_symbol_aliases(
+                    snapshot.canonical_symbol,
+                    snapshot.base_asset,
+                    [snapshot.exchange_symbol],
+                )
+            }
+        )
+
+        if len(matches) == 1:
+            return matches[0], None
+
+        if len(matches) > 1:
+            candidates = ", ".join(matches[:5])
+            return None, (
+                f"I found multiple matches for <b>{normalized_query.uppercase}</b>.\n"
+                f"Please use the full symbol: {candidates}"
+            )
+
+        return None, error
 
     def _format_coin_reply(self, match: ArbitrageOpportunity) -> str:
         next_funding_time = earliest_funding_time(match)
@@ -217,6 +300,56 @@ class TelegramCommandService:
             f"Confidence - {match.confidence_score * 100:.0f}/100\n"
             f"Funding expiry - {format_countdown(next_funding_time, now)}"
         )
+
+    def _format_compare_reply(
+        self,
+        query: str,
+        snapshots: list[FundingSnapshot],
+        opportunities: list[ArbitrageOpportunity],
+    ) -> str:
+        canonical_symbol, error = self.find_canonical_symbol(query, snapshots, opportunities)
+        if canonical_symbol is None:
+            return error or f"I could not find <b>{query.upper()}</b>."
+
+        matching_snapshots = sorted(
+            [snapshot for snapshot in snapshots if snapshot.canonical_symbol == canonical_symbol],
+            key=lambda snapshot: (self._display_name(snapshot.exchange), snapshot.exchange_symbol),
+        )
+        if not matching_snapshots:
+            return f"No live exchange snapshots are available for <b>{canonical_symbol}</b> right now."
+
+        now = datetime.now(timezone.utc)
+        opportunity = next((item for item in opportunities if item.canonical_symbol == canonical_symbol), None)
+
+        parts = [f"<b>{canonical_symbol}</b>", "", "<b>Exchange comparison</b>"]
+        for snapshot in matching_snapshots:
+            parts.extend(
+                [
+                    "",
+                    f"<b>{self._display_name(snapshot.exchange)}</b>",
+                    f"Symbol - {snapshot.exchange_symbol}",
+                    f"Funding rate - {snapshot.funding_rate * 100:.3f}%",
+                    f"Mark price - {self._format_number(snapshot.mark_price)}",
+                    f"Open interest - {self._format_usd(snapshot.open_interest_usd)}",
+                    f"Next funding - {format_countdown(snapshot.next_funding_time, now)}",
+                ]
+            )
+
+        if opportunity is not None:
+            next_funding_time = earliest_funding_time(opportunity)
+            parts.extend(
+                [
+                    "",
+                    "<b>Best live pair</b>",
+                    f"Spread - {opportunity.spread_rate * 100:.3f}%",
+                    f"Buy / Long - {opportunity.long_leg.display_name}",
+                    f"Sell / Short - {opportunity.short_leg.display_name}",
+                    f"Net APR - {opportunity.net_apr_percent:.2f}%",
+                    f"Funding expiry - {format_countdown(next_funding_time, now)}",
+                ]
+            )
+
+        return "\n".join(parts)
 
     def _format_multi_exchange_funding(self, snapshots: list[FundingSnapshot], *, positive: bool) -> str:
         leaders = build_funding_leaders(snapshots, limit=5)
@@ -246,3 +379,34 @@ class TelegramCommandService:
             or ["No negative symbols right now."]
         )
         return "\n".join(parts)
+
+    def _format_exchanges(self, snapshots: list[FundingSnapshot]) -> str:
+        exchange_names = sorted({snapshot.exchange for snapshot in snapshots})
+        if not exchange_names:
+            return "No active exchanges are available right now."
+        parts = ["<b>Active exchanges</b>", ""]
+        parts.extend(f"- {self._display_name(exchange)}" for exchange in exchange_names)
+        return "\n".join(parts)
+
+    async def _format_status(self, chat_id: str) -> str:
+        alerts_enabled = await self.history_store.get_alerts_enabled(chat_id)
+        watchlist = await self.history_store.get_watch_symbols(chat_id)
+        return (
+            "<b>Your bot status</b>\n\n"
+            f"Automatic alerts - <b>{'on' if alerts_enabled else 'off'}</b>\n"
+            f"Watchlist size - <b>{len(watchlist)}</b>\n"
+            f"Saved symbols - {', '.join(watchlist[:8]) if watchlist else 'none'}"
+        )
+
+    def _display_name(self, exchange: str) -> str:
+        return DISPLAY_NAMES.get(exchange, exchange.title())
+
+    def _format_usd(self, value: float | None) -> str:
+        if value is None:
+            return "n/a"
+        return f"${value:,.0f}"
+
+    def _format_number(self, value: float | None) -> str:
+        if value is None:
+            return "n/a"
+        return f"{value:,.6f}".rstrip("0").rstrip(".")
