@@ -297,6 +297,89 @@ button {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.status-card-active {
+  border-color: var(--border-strong);
+}
+
+.status-card-muted {
+  opacity: 0.7;
+}
+
+.exchange-scope-panel {
+  margin-top: 18px;
+  padding: 20px 22px;
+  border: 1px solid var(--border);
+  border-radius: 26px;
+  background: var(--surface);
+  backdrop-filter: blur(24px) saturate(1.14);
+  box-shadow: var(--shadow-soft);
+}
+
+.exchange-scope-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.exchange-scope-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted-strong);
+}
+
+.exchange-scope-chip strong {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.exchange-scope-chip-active.exchange-binance,
+.exchange-inline-pill-active.exchange-binance {
+  background: var(--binance-soft);
+  color: var(--binance);
+  border-color: rgba(244, 211, 106, 0.24);
+}
+
+.exchange-scope-chip-active.exchange-delta,
+.exchange-inline-pill-active.exchange-delta {
+  background: var(--delta-soft);
+  color: var(--delta);
+  border-color: rgba(122, 167, 255, 0.24);
+}
+
+.exchange-scope-chip-active.exchange-coindcx,
+.exchange-inline-pill-active.exchange-coindcx {
+  background: var(--coindcx-soft);
+  color: var(--coindcx);
+  border-color: rgba(140, 230, 186, 0.24);
+}
+
+.exchange-scope-chip-active.exchange-coinswitch,
+.exchange-inline-pill-active.exchange-coinswitch,
+.table-pill.exchange-coinswitch,
+.best-pair-leg.exchange-coinswitch,
+.settlement-exchange-line.exchange-coinswitch {
+  color: var(--coinswitch);
+  background: var(--coinswitch-soft);
+  border-color: rgba(255, 180, 146, 0.24);
+}
+
+.exchange-scope-chip:disabled,
+.exchange-inline-pill:disabled {
+  cursor: not-allowed;
+  opacity: 0.78;
+}
+
+.exchange-scope-summary {
+  margin-top: 14px;
+}
+
 .summary-card strong,
 .status-card strong,
 .toolbar-stat strong {
@@ -574,6 +657,14 @@ button {
   border-top: 1px solid var(--border);
 }
 
+.compare-missing-card {
+  justify-content: start;
+}
+
+.compare-missing-empty {
+  margin-top: 18px;
+}
+
 .compare-warning-list {
   margin-top: 14px;
 }
@@ -747,7 +838,7 @@ button {
 
 .table-toolbar {
   display: grid;
-  grid-template-columns: minmax(0, 1.5fr) repeat(2, minmax(180px, 0.55fr)) minmax(180px, 0.45fr) auto;
+  grid-template-columns: minmax(0, 1.35fr) minmax(240px, 0.95fr) repeat(2, minmax(180px, 0.5fr)) minmax(180px, 0.45fr) auto;
   gap: 14px;
   align-items: end;
   margin-bottom: 18px;
@@ -779,6 +870,26 @@ button {
 
 .search-control {
   min-width: 0;
+}
+
+.exchange-toggle-inline {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.exchange-toggle-inline-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.exchange-inline-pill {
+  margin-bottom: 0;
+}
+
+.exchange-inline-pill-muted {
+  opacity: 0.6;
 }
 
 .control input,
@@ -1213,7 +1324,13 @@ button {
   background: var(--coindcx-soft);
   border-color: rgba(140, 230, 186, 0.24);
 }
-
+.table-pill.exchange-coinswitch,
+.best-pair-leg.exchange-coinswitch,
+.settlement-exchange-line.exchange-coinswitch {
+  color: var(--coinswitch);
+  background: var(--coinswitch-soft);
+  border-color: rgba(255, 180, 146, 0.24);
+}
 .overview-button:hover,
 .close-button:hover,
 .watch-button:hover {

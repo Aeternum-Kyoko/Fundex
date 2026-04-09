@@ -3,10 +3,11 @@ import type { ExecutionPlanResponse } from "../lib/execution-types";
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "/api";
 
-export function useExecutionPlan(canonicalSymbol: string | null, enabled = true) {
+export function useExecutionPlan(canonicalSymbol: string | null, enabled = true, selectedExchanges: string[] = []) {
   const [plan, setPlan] = useState<ExecutionPlanResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const exchangeQuery = selectedExchanges.join(",");
 
   useEffect(() => {
     let cancelled = false;
@@ -22,8 +23,9 @@ export function useExecutionPlan(canonicalSymbol: string | null, enabled = true)
       setError(null);
       setLoading(true);
       try {
+        const exchangeSuffix = exchangeQuery ? `&exchanges=${encodeURIComponent(exchangeQuery)}` : "";
         const response = await fetch(
-          `${API_BASE}/opportunities/${encodeURIComponent(canonicalSymbol)}/execution-plan?notional_usd=1000&leverage=2&holding_periods=1&basis_risk_buffer_percent=0.35`,
+          `${API_BASE}/opportunities/${encodeURIComponent(canonicalSymbol)}/execution-plan?notional_usd=1000&leverage=2&holding_periods=1&basis_risk_buffer_percent=0.35${exchangeSuffix}`,
         );
         if (!response.ok) {
           throw new Error("Failed to load execution helper.");
@@ -50,7 +52,7 @@ export function useExecutionPlan(canonicalSymbol: string | null, enabled = true)
     return () => {
       cancelled = true;
     };
-  }, [canonicalSymbol, enabled]);
+  }, [canonicalSymbol, enabled, exchangeQuery]);
 
   return { plan, loading, error };
 }

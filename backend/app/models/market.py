@@ -169,6 +169,7 @@ class SymbolComparisonResponse(BaseModel):
     base_asset: str
     quote_asset: str
     total_exchanges: int
+    requested_exchanges: list[ExchangeName] = Field(default_factory=list)
     exchanges: list[SymbolComparisonExchangeSnapshot]
     best_opportunity: ArbitrageOpportunity | None = None
 

@@ -54,3 +54,13 @@ class OpportunityRankerTests(unittest.TestCase):
         self.assertEqual(opportunity.long_leg.exchange, "delta")
         self.assertEqual(opportunity.short_leg.exchange, "coindcx")
         self.assertAlmostEqual(opportunity.spread_rate, 0.0035)
+
+    def test_flat_snapshot_without_supporting_liquidity_is_ignored(self) -> None:
+        snapshots = [
+            make_snapshot(exchange="coinswitch", canonical_symbol="RDNT-USDT-PERP", exchange_symbol="RDNTUSDT", funding_rate=-0.0023, open_interest_usd=500_000),
+            make_snapshot(exchange="binance", canonical_symbol="RDNT-USDT-PERP", exchange_symbol="RDNTUSDT", funding_rate=0.0, open_interest_usd=None, mark_price=0.00235),
+        ]
+
+        opportunities = build_opportunities(snapshots, self.settings)
+
+        self.assertEqual(opportunities, [])

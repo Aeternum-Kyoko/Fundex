@@ -4,6 +4,16 @@ export function formatPct(value: number, digits = 2) {
   return `${value.toFixed(digits)}%`;
 }
 
+export function formatFundingRate(value: number | null | undefined, digits = 3) {
+  if (value == null) {
+    return "n/a";
+  }
+  if (Math.abs(value) < 0.000005) {
+    return "flat";
+  }
+  return formatPct(value * 100, digits);
+}
+
 export function formatUsd(value: number | null) {
   if (!value) {
     return "n/a";

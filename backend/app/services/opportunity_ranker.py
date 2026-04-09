@@ -8,6 +8,12 @@ from app.models.market import ArbitrageOpportunity, FundingSnapshot, Opportunity
 from app.services.links import exchange_display_name, exchange_trade_url
 
 
+def is_snapshot_usable(snapshot: FundingSnapshot) -> bool:
+    if abs(snapshot.funding_rate) < 0.0000005 and snapshot.open_interest_usd is None and snapshot.volume_24h is None:
+        return False
+    return True
+
+
 def build_opportunities(snapshots: list[FundingSnapshot], settings: Settings) -> list[ArbitrageOpportunity]:
     opportunities: list[ArbitrageOpportunity] = []
 
@@ -67,6 +73,8 @@ def build_opportunities(snapshots: list[FundingSnapshot], settings: Settings) ->
 def group_snapshots_by_symbol(snapshots: list[FundingSnapshot]) -> dict[str, list[FundingSnapshot]]:
     grouped: dict[str, list[FundingSnapshot]] = defaultdict(list)
     for snapshot in snapshots:
+        if not is_snapshot_usable(snapshot):
+            continue
         grouped[snapshot.canonical_symbol].append(snapshot)
     return grouped
 

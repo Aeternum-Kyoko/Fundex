@@ -89,6 +89,47 @@ class TelegramCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("CoinDCX", reply)
         self.assertIn("Best live pair", reply)
 
+    async def test_compare_command_marks_missing_exchange_as_not_listed(self) -> None:
+        snapshots = [
+            make_snapshot(exchange="binance", canonical_symbol="BTC-USDT-PERP", funding_rate=0.001, exchange_symbol="BTCUSDT"),
+            make_snapshot(exchange="delta", canonical_symbol="BTC-USDT-PERP", funding_rate=-0.0012, exchange_symbol="BTCUSD"),
+        ]
+        opportunities = [
+            make_opportunity(
+                canonical_symbol="BTC-USDT-PERP",
+                long_exchange="delta",
+                short_exchange="binance",
+                long_symbol="BTCUSD",
+                short_symbol="BTCUSDT",
+            )
+        ]
+
+        reply = await self.service.build_reply("chat-1", "/compare BTC", snapshots, opportunities)
+
+        self.assertIn("CoinDCX", reply)
+        self.assertIn("Not listed right now for this symbol.", reply)
+
+    async def test_compare_command_formats_flat_funding_without_zero_percent(self) -> None:
+        snapshots = [
+            make_snapshot(exchange="binance", canonical_symbol="BTC-USDT-PERP", funding_rate=0.0, exchange_symbol="BTCUSDT"),
+            make_snapshot(exchange="delta", canonical_symbol="BTC-USDT-PERP", funding_rate=-0.0012, exchange_symbol="BTCUSD"),
+        ]
+        opportunities = [
+            make_opportunity(
+                canonical_symbol="BTC-USDT-PERP",
+                long_exchange="delta",
+                short_exchange="binance",
+                long_symbol="BTCUSD",
+                short_symbol="BTCUSDT",
+                short_rate=0.0,
+            )
+        ]
+
+        reply = await self.service.build_reply("chat-1", "/compare BTC", snapshots, opportunities)
+
+        self.assertIn("Funding rate - flat", reply)
+        self.assertNotIn("Funding rate - 0.000%", reply)
+
     async def test_status_command_reports_watchlist_and_alerts(self) -> None:
         await self.store.add_watch_symbol("chat-1", "BTC-USDT-PERP")
         await self.store.set_alerts_enabled("chat-1", False)

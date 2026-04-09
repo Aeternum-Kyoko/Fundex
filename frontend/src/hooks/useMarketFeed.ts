@@ -18,7 +18,7 @@ const emptyResponse: OpportunitiesResponse = {
   opportunities: [],
 };
 
-export function useMarketFeed(refreshIntervalMs = 5000) {
+export function useMarketFeed(refreshIntervalMs = 5000, selectedExchanges: string[] = []) {
   const [data, setData] = useState<OpportunitiesResponse>(emptyResponse);
   const [statuses, setStatuses] = useState<ExchangeStatus[]>([]);
   const [fundingLeaders, setFundingLeaders] = useState<ExchangeFundingLeaders[]>([]);
@@ -27,14 +27,17 @@ export function useMarketFeed(refreshIntervalMs = 5000) {
   const [isLoading, setIsLoading] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
 
+  const exchangeQuery = selectedExchanges.join(",");
+
   const load = useCallback(async () => {
     setIsLoading(true);
     try {
+      const suffix = exchangeQuery ? `?exchanges=${encodeURIComponent(exchangeQuery)}` : "";
       const [statusResponse, opportunitiesResponse, fundingLeadersResponse, fundingSettlementsResponse] = await Promise.all([
         fetch(`${API_BASE}/exchanges/status`),
-        fetch(`${API_BASE}/arbitrage-opportunities`),
-        fetch(`${API_BASE}/exchanges/funding-leaders`),
-        fetch(`${API_BASE}/exchanges/funding-settlements`),
+        fetch(`${API_BASE}/arbitrage-opportunities${suffix}`),
+        fetch(`${API_BASE}/exchanges/funding-leaders${suffix}`),
+        fetch(`${API_BASE}/exchanges/funding-settlements${suffix}`),
       ]);
 
       if (!statusResponse.ok || !opportunitiesResponse.ok || !fundingLeadersResponse.ok || !fundingSettlementsResponse.ok) {
@@ -59,7 +62,7 @@ export function useMarketFeed(refreshIntervalMs = 5000) {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [exchangeQuery]);
 
   useEffect(() => {
     let cancelled = false;

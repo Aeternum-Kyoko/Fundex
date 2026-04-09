@@ -1,11 +1,12 @@
 import { useEffect } from "react";
 import { formatCountdown, formatPct, formatTimestamp, formatUsd, getNextFundingTime } from "../lib/monitor";
-import type { ArbitrageOpportunity } from "../lib/types";
+import type { ArbitrageOpportunity, ExchangeName } from "../lib/types";
 
 interface OpportunityInspectorProps {
   opportunity: ArbitrageOpportunity | null;
   isOpen: boolean;
   nowTimestamp: number;
+  selectedExchanges: ExchangeName[];
   onClose: () => void;
 }
 
@@ -13,6 +14,7 @@ export function OpportunityInspector({
   opportunity,
   isOpen,
   nowTimestamp,
+  selectedExchanges,
   onClose,
 }: OpportunityInspectorProps) {
   useEffect(() => {
@@ -42,6 +44,9 @@ export function OpportunityInspector({
 
   const nextFunding = getNextFundingTime(opportunity);
   const legs = [opportunity.long_leg, opportunity.short_leg];
+  const compareHref = `/compare/${encodeURIComponent(opportunity.canonical_symbol)}${
+    selectedExchanges.length ? `?exchanges=${encodeURIComponent(selectedExchanges.join(","))}` : ""
+  }`;
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -64,7 +69,7 @@ export function OpportunityInspector({
             <div className={opportunity.net_apr_percent >= 0 ? "phase-pill" : "overview-badge negative-badge"}>
               {formatPct(opportunity.net_apr_percent)}
             </div>
-            <a className="overview-button compare-button-link" href={`/compare/${encodeURIComponent(opportunity.canonical_symbol)}`}>
+            <a className="overview-button compare-button-link" href={compareHref}>
               Compare
             </a>
             <button type="button" className="close-button" onClick={onClose} aria-label="Close overview">

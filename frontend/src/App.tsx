@@ -7,17 +7,20 @@ import { OpportunityTable } from "./components/OpportunityTable";
 import { useMarketFeed } from "./hooks/useMarketFeed";
 import {
   buildOpportunityCsv,
+  exchangeLabel,
+  exchangeToneClass,
   formatCountdown,
   formatPct,
   formatTimestamp,
   getNextFundingTime,
 } from "./lib/monitor";
-import type { ArbitrageOpportunity } from "./lib/types";
+import type { ArbitrageOpportunity, ExchangeName } from "./lib/types";
 
 const ALERTS_KEY = "arbradar-alerts";
 const REFRESH_KEY = "arbradar-refresh";
 const NOTIFICATIONS_KEY = "arbradar-notifications";
 const ALERT_HISTORY_KEY = "arbradar-alert-history";
+const EXCHANGE_SCOPE_KEY = "arbradar-exchange-scope";
 
 interface AlertPreferences {
   minSpreadPercent: number;
@@ -120,6 +123,24 @@ function readAlertHistory() {
   }
 }
 
+function readStoredStringArray(key: string) {
+  if (typeof window === "undefined") {
+    return [] as string[];
+  }
+
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) {
+      return [] as string[];
+    }
+
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [] as string[];
+  }
+}
+
 function downloadCsv(csv: string, filename: string) {
   if (!csv) {
     return;
@@ -190,10 +211,18 @@ export function App() {
     typeof Notification === "undefined" ? "denied" : Notification.permission,
   );
   const [recentAlerts, setRecentAlerts] = useState<AlertEvent[]>(() => readAlertHistory());
+  const [selectedExchanges, setSelectedExchanges] = useState<ExchangeName[]>(
+    () => readStoredStringArray(EXCHANGE_SCOPE_KEY) as ExchangeName[],
+  );
   const recentAlertsRef = useRef(recentAlerts);
 
   const { data, statuses, fundingLeaders, fundingSettlements, error, isLoading, lastUpdatedAt, refresh } =
-    useMarketFeed(refreshIntervalMs);
+    useMarketFeed(refreshIntervalMs, selectedExchanges);
+
+  const toggleableExchanges = useMemo(
+    () => statuses.filter((status) => status.enabled && status.configured).map((status) => status.exchange),
+    [statuses],
+  );
   const deferredSearch = useDeferredValue(search);
 
   useEffect(() => {
@@ -212,6 +241,27 @@ export function App() {
   useEffect(() => {
     window.localStorage.setItem(REFRESH_KEY, String(refreshIntervalMs));
   }, [refreshIntervalMs]);
+
+  useEffect(() => {
+    window.localStorage.setItem(EXCHANGE_SCOPE_KEY, JSON.stringify(selectedExchanges));
+  }, [selectedExchanges]);
+
+  useEffect(() => {
+    if (!toggleableExchanges.length) {
+      return;
+    }
+
+    setSelectedExchanges((current) => {
+      const filtered = current.filter((exchange): exchange is ExchangeName => toggleableExchanges.includes(exchange));
+      const next = filtered.length >= 2 ? filtered : toggleableExchanges.slice(0, Math.max(2, toggleableExchanges.length));
+
+      if (next.length === current.length && next.every((exchange, index) => exchange === current[index])) {
+        return current;
+      }
+
+      return next;
+    });
+  }, [toggleableExchanges]);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -404,6 +454,25 @@ export function App() {
     return { positiveRows, negativeRows, avgConfidence, largestSpread };
   }, [visibleOpportunities]);
 
+  const selectedExchangeLabel = useMemo(
+    () => selectedExchanges.map((exchange) => exchangeLabel(exchange)).join(", "),
+    [selectedExchanges],
+  );
+
+  const toggleExchange = (exchange: ExchangeName) => {
+    setSelectedExchanges((current) => {
+      const isSelected = current.includes(exchange);
+      if (isSelected) {
+        if (current.length <= 2) {
+          return current;
+        }
+        return current.filter((item) => item !== exchange);
+      }
+
+      return [...current, exchange];
+    });
+  };
+
   return (
     <main className="page">
       <nav className="top-nav">
@@ -427,7 +496,10 @@ export function App() {
         <div className="hero-card control-center-card">
           <span className="chip">Desk state</span>
           <strong>{isLoading ? "Refreshing live data" : "Live monitor ready"}</strong>
-          <p>Use the sticky desk bar to search, sort, refresh, export, and move quickly between the table and compare flow.</p>
+          <p>
+            Use the exchange scope toggles to keep the whole desk on the exact venues you want, then search, sort, refresh,
+            export, and move quickly between the table and compare flow.
+          </p>
         </div>
       </section>
 
@@ -458,7 +530,7 @@ export function App() {
 
       <section className="status-grid">
         {statuses.map((status) => (
-          <article className="status-card" key={status.exchange}>
+          <article className={`status-card ${selectedExchanges.includes(status.exchange) ? "status-card-active" : "status-card-muted"}`} key={status.exchange}>
             <div className="status-topline">
               <strong>{status.display_name}</strong>
               <span className={status.healthy ? "healthy" : status.configured ? "unhealthy" : "pending"}>
@@ -475,6 +547,39 @@ export function App() {
             </span>
           </article>
         ))}
+      </section>
+
+      <section className="exchange-scope-panel">
+        <div className="overview-card-header">
+          <div>
+            <p className="eyebrow">Exchange Scope</p>
+            <strong>{selectedExchanges.length} exchanges selected</strong>
+          </div>
+          <span className="subtle">Keep at least two exchanges active. The table, leaders, settlements, and compare view all follow this scope.</span>
+        </div>
+        <div className="exchange-scope-chips">
+          {statuses
+            .filter((status) => status.enabled && status.configured)
+            .map((status) => {
+              const active = selectedExchanges.includes(status.exchange);
+              const locked = active && selectedExchanges.length <= 2;
+              return (
+                <button
+                  key={status.exchange}
+                  type="button"
+                  className={`exchange-scope-chip ${exchangeToneClass(status.exchange)} ${active ? "exchange-scope-chip-active" : ""}`}
+                  onClick={() => toggleExchange(status.exchange)}
+                  disabled={locked}
+                  aria-pressed={active}
+                  title={locked ? "At least two exchanges must stay selected." : undefined}
+                >
+                  <span>{status.display_name}</span>
+                  <strong>{active ? "On" : "Off"}</strong>
+                </button>
+              );
+            })}
+        </div>
+        <div className="subtle exchange-scope-summary">Current desk scope: {selectedExchangeLabel || "Waiting for exchanges"}</div>
       </section>
 
       {error ? <div className="banner banner-error">{error}</div> : null}
@@ -502,7 +607,7 @@ export function App() {
               <p className="eyebrow">Alert Center</p>
               <strong>{activeAlerts.length} active alerts</strong>
             </div>
-            <span className="subtle">Watching all visible live rows.</span>
+            <span className="subtle">Watching all visible live rows inside the current exchange scope.</span>
           </div>
 
           <div className="alert-controls">
@@ -667,9 +772,7 @@ export function App() {
                 Search inside the table, sort by spread or funding timing, export snapshots, and open any row for a full-screen overview.
               </div>
             </div>
-            <div className="panel-note">
-              {selectedOpportunity ? `Selected: ${selectedOpportunity.canonical_symbol}` : data.phase}
-            </div>
+            <div className="panel-note">{selectedOpportunity ? `Selected: ${selectedOpportunity.canonical_symbol}` : selectedExchangeLabel}</div>
           </div>
 
           <div className="exchange-health-strip">
@@ -706,6 +809,29 @@ export function App() {
                 placeholder="Search BTC, ETH, Binance, Delta, CoinDCX, CoinSwitch..."
               />
             </label>
+
+            <div className="exchange-toggle-inline">
+              <span className="subtle">Exchanges</span>
+              <div className="exchange-toggle-inline-row">
+                {statuses
+                  .filter((status) => status.enabled && status.configured)
+                  .map((status) => {
+                    const active = selectedExchanges.includes(status.exchange);
+                    const locked = active && selectedExchanges.length <= 2;
+                    return (
+                      <button
+                        key={status.exchange}
+                        type="button"
+                        className={`table-pill exchange-inline-pill ${exchangeToneClass(status.exchange)} ${active ? "exchange-inline-pill-active" : "exchange-inline-pill-muted"}`}
+                        onClick={() => toggleExchange(status.exchange)}
+                        disabled={locked}
+                      >
+                        {exchangeLabel(status.exchange)}
+                      </button>
+                    );
+                  })}
+              </div>
+            </div>
 
             <label className="control">
               <span className="subtle">View</span>
@@ -753,6 +879,7 @@ export function App() {
             <OpportunityTable
               opportunities={visibleOpportunities}
               selectedSymbol={selectedOpportunity?.canonical_symbol ?? null}
+              selectedExchanges={selectedExchanges}
               nowTimestamp={nowTimestamp}
               onSelect={openOverview}
             />
@@ -764,6 +891,7 @@ export function App() {
         opportunity={selectedOpportunity}
         isOpen={isOverviewOpen}
         nowTimestamp={nowTimestamp}
+        selectedExchanges={selectedExchanges}
         onClose={() => setIsOverviewOpen(false)}
       />
     </main>

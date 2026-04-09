@@ -3,10 +3,11 @@ import type { SymbolComparisonResponse } from "../lib/types";
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "/api";
 
-export function useSymbolComparison(canonicalSymbol: string | null) {
+export function useSymbolComparison(canonicalSymbol: string | null, selectedExchanges: string[] = []) {
   const [comparison, setComparison] = useState<SymbolComparisonResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const exchangeQuery = selectedExchanges.join(",");
 
   useEffect(() => {
     let cancelled = false;
@@ -22,7 +23,10 @@ export function useSymbolComparison(canonicalSymbol: string | null) {
       setError(null);
       setLoading(true);
       try {
-        const response = await fetch(`${API_BASE}/symbols/${encodeURIComponent(canonicalSymbol)}/comparison`);
+        const suffix = exchangeQuery
+          ? `?exchanges=${encodeURIComponent(exchangeQuery)}`
+          : "";
+        const response = await fetch(`${API_BASE}/symbols/${encodeURIComponent(canonicalSymbol)}/comparison${suffix}`);
         if (!response.ok) {
           throw new Error("Failed to load symbol comparison.");
         }
@@ -48,7 +52,7 @@ export function useSymbolComparison(canonicalSymbol: string | null) {
     return () => {
       cancelled = true;
     };
-  }, [canonicalSymbol]);
+  }, [canonicalSymbol, exchangeQuery]);
 
   return { comparison, loading, error };
 }

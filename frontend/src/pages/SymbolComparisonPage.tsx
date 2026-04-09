@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useExecutionPlan } from "../hooks/useExecutionPlan";
 import { useSymbolComparison } from "../hooks/useSymbolComparison";
-import { exchangeToneClass, explainNoPair, formatCountdown, formatPct, formatTimestamp, formatUsd } from "../lib/monitor";
+import { exchangeLabel, exchangeToneClass, explainNoPair, formatCountdown, formatFundingRate, formatPct, formatTimestamp, formatUsd } from "../lib/monitor";
 
 function buildExchangeDiagnostics(exchange: {
   data_age_seconds: number | null;
@@ -40,10 +40,19 @@ function buildExchangeDiagnostics(exchange: {
 }
 
 export function SymbolComparisonPage({ canonicalSymbol }: { canonicalSymbol: string }) {
-  const { comparison, loading, error } = useSymbolComparison(canonicalSymbol);
+  const selectedExchanges = useMemo(() => {
+    const params = new URLSearchParams(window.location.search);
+    const exchanges = params.get("exchanges");
+    return exchanges ? exchanges.split(",").map((item) => item.trim().toLowerCase()).filter(Boolean) : [];
+  }, []);
+  const { comparison, loading, error } = useSymbolComparison(canonicalSymbol, selectedExchanges);
 
   const bestOpportunity = comparison?.best_opportunity ?? null;
-  const { plan, loading: planLoading } = useExecutionPlan(bestOpportunity?.canonical_symbol ?? null, Boolean(bestOpportunity));
+  const { plan, loading: planLoading } = useExecutionPlan(
+    bestOpportunity?.canonical_symbol ?? null,
+    Boolean(bestOpportunity),
+    selectedExchanges,
+  );
   const nowTimestamp = Date.now();
   const noPairReason = useMemo(
     () => (comparison && !bestOpportunity ? explainNoPair(comparison.exchanges) : null),
@@ -65,6 +74,13 @@ export function SymbolComparisonPage({ canonicalSymbol }: { canonicalSymbol: str
 
     return new Date(Math.min(...timestamps)).toISOString();
   }, [bestOpportunity]);
+  const missingExchanges = useMemo(() => {
+    if (!comparison) {
+      return [];
+    }
+    const listed = new Set(comparison.exchanges.map((exchange) => exchange.exchange));
+    return comparison.requested_exchanges.filter((exchange) => !listed.has(exchange));
+  }, [comparison]);
 
   return (
     <main className="page compare-page">
@@ -171,7 +187,7 @@ export function SymbolComparisonPage({ canonicalSymbol }: { canonicalSymbol: str
                       <strong>{exchange.display_name}</strong>
                     </div>
                     <span className={exchange.funding_rate >= 0 ? "phase-pill" : "overview-badge negative-badge"}>
-                      {formatPct(exchange.funding_rate * 100, 3)}
+                      {formatFundingRate(exchange.funding_rate)}
                     </span>
                   </div>
 
@@ -244,6 +260,26 @@ export function SymbolComparisonPage({ canonicalSymbol }: { canonicalSymbol: str
                     ) : (
                       <p className="subtle">Feed timing, mark quality, and funding fields look usable for monitoring.</p>
                     )}
+                  </div>
+                </article>
+              ))}
+
+              {missingExchanges.map((exchange) => (
+                <article
+                  className={`overview-card compare-exchange-card compare-missing-card ${exchangeToneClass(exchange)}`}
+                  key={`missing-${exchange}`}
+                >
+                  <div className="overview-card-header">
+                    <div>
+                      <p className="eyebrow">Exchange</p>
+                      <strong>{exchangeLabel(exchange)}</strong>
+                    </div>
+                    <span className="overview-badge">Not listed</span>
+                  </div>
+
+                  <div className="empty-state compact-empty compare-missing-empty">
+                    <p>This symbol is not listed on {exchangeLabel(exchange)} right now.</p>
+                    <span>No live funding details are available for this venue in the current scope.</span>
                   </div>
                 </article>
               ))}

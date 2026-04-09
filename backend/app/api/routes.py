@@ -22,12 +22,28 @@ from app.services.arbitrage import build_opportunities
 from app.services.execution import build_execution_plan
 from app.services.funding_leaders import build_funding_leaders
 from app.services.links import exchange_display_name, exchange_trade_url
+from app.services.opportunity_ranker import is_snapshot_usable
 
 router = APIRouter()
 
 
 def _enabled_exchanges(request: Request) -> list[str]:
     return request.app.state.settings.enabled_exchange_names
+
+
+def _resolved_exchanges(request: Request, exchanges: str | None = None) -> list[str]:
+    enabled = _enabled_exchanges(request)
+    if not exchanges:
+        return enabled
+
+    requested = [item.strip().lower() for item in exchanges.split(",") if item.strip()]
+    resolved = [exchange for exchange in enabled if exchange in requested]
+    return resolved or enabled
+
+
+async def _snapshots_for_exchanges(request: Request, exchanges: list[str]) -> list:
+    snapshots = await request.app.state.market_store.get_snapshots()
+    return [snapshot for snapshot in snapshots if snapshot.exchange in exchanges]
 
 
 @router.get("/health")
@@ -47,33 +63,35 @@ async def exchange_status(request: Request) -> list[dict]:
 
 
 @router.get("/arbitrage-opportunities", response_model=OpportunitiesResponse)
-async def arbitrage_opportunities(request: Request) -> OpportunitiesResponse:
-    snapshots = await request.app.state.market_store.get_snapshots()
+async def arbitrage_opportunities(request: Request, exchanges: str | None = None) -> OpportunitiesResponse:
+    selected_exchanges = _resolved_exchanges(request, exchanges)
+    snapshots = await _snapshots_for_exchanges(request, selected_exchanges)
     opportunities = build_opportunities(snapshots, request.app.state.settings)
-    enabled_exchanges = _enabled_exchanges(request)
 
     return OpportunitiesResponse(
         total=len(opportunities),
-        exchanges_in_backend=enabled_exchanges,
+        exchanges_in_backend=selected_exchanges,
         frontend_optional_exchanges=[],
         opportunities=opportunities,
     )
 
 
 @router.get("/exchanges/funding-leaders", response_model=FundingLeadersResponse)
-async def exchange_funding_leaders(request: Request, limit: int = 5) -> FundingLeadersResponse:
-    snapshots = await request.app.state.market_store.get_snapshots()
+async def exchange_funding_leaders(request: Request, limit: int = 5, exchanges: str | None = None) -> FundingLeadersResponse:
+    selected_exchanges = _resolved_exchanges(request, exchanges)
+    snapshots = await _snapshots_for_exchanges(request, selected_exchanges)
     resolved_limit = max(1, min(limit, 20))
     return build_funding_leaders(
         snapshots,
         limit=resolved_limit,
-        exchanges_to_include=tuple(_enabled_exchanges(request)),
+        exchanges_to_include=tuple(selected_exchanges),
     )
 
 
 @router.get("/exchanges/funding-settlements", response_model=FundingSettlementResponse)
-async def exchange_funding_settlements(request: Request, limit: int = 12) -> FundingSettlementResponse:
-    snapshots = await request.app.state.market_store.get_snapshots()
+async def exchange_funding_settlements(request: Request, limit: int = 12, exchanges: str | None = None) -> FundingSettlementResponse:
+    selected_exchanges = _resolved_exchanges(request, exchanges)
+    snapshots = await _snapshots_for_exchanges(request, selected_exchanges)
     now = datetime.now(timezone.utc)
     resolved_limit = max(1, min(limit, 40))
     items = [
@@ -105,8 +123,7 @@ async def exchange_funding_trends(
     limit: int = 16,
 ) -> FundingTrendsResponse:
     symbol_list = [item.strip().upper() for item in symbols.split(",") if item.strip()]
-    raw_exchanges = exchanges or ",".join(_enabled_exchanges(request))
-    exchange_list = [item.strip().lower() for item in raw_exchanges.split(",") if item.strip()]
+    exchange_list = _resolved_exchanges(request, exchanges)
     resolved_limit = max(2, min(limit, 32))
     series = await request.app.state.history_store.get_funding_trends(symbol_list, exchange_list, resolved_limit)
     return FundingTrendsResponse(total_series=len(series), series=series)
@@ -119,12 +136,12 @@ async def stream_opportunities(request: Request) -> StreamingResponse:
             if await request.is_disconnected():
                 break
 
-            snapshots = await request.app.state.market_store.get_snapshots()
+            selected_exchanges = _resolved_exchanges(request, request.query_params.get("exchanges"))
+            snapshots = await _snapshots_for_exchanges(request, selected_exchanges)
             opportunities = build_opportunities(snapshots, request.app.state.settings)
-            enabled_exchanges = _enabled_exchanges(request)
             payload = OpportunitiesResponse(
                 total=len(opportunities),
-                exchanges_in_backend=enabled_exchanges,
+                exchanges_in_backend=selected_exchanges,
                 frontend_optional_exchanges=[],
                 opportunities=opportunities,
             )
@@ -143,10 +160,15 @@ async def opportunity_history(request: Request, canonical_symbol: str, limit: in
 
 
 @router.get("/symbols/{canonical_symbol}/comparison", response_model=SymbolComparisonResponse)
-async def symbol_comparison(request: Request, canonical_symbol: str) -> SymbolComparisonResponse:
-    snapshots = await request.app.state.market_store.get_snapshots()
+async def symbol_comparison(request: Request, canonical_symbol: str, exchanges: str | None = None) -> SymbolComparisonResponse:
+    selected_exchanges = _resolved_exchanges(request, exchanges)
+    snapshots = await _snapshots_for_exchanges(request, selected_exchanges)
     normalized_symbol = canonical_symbol.upper()
-    symbol_snapshots = [snapshot for snapshot in snapshots if snapshot.canonical_symbol.upper() == normalized_symbol]
+    symbol_snapshots = [
+        snapshot
+        for snapshot in snapshots
+        if snapshot.canonical_symbol.upper() == normalized_symbol and is_snapshot_usable(snapshot)
+    ]
 
     if not symbol_snapshots:
         raise HTTPException(status_code=404, detail="Symbol not found in the current live comparison set.")
@@ -181,6 +203,7 @@ async def symbol_comparison(request: Request, canonical_symbol: str) -> SymbolCo
         base_asset=first.base_asset,
         quote_asset=first.quote_asset,
         total_exchanges=len(comparison_rows),
+        requested_exchanges=selected_exchanges,
         exchanges=comparison_rows,
         best_opportunity=best_opportunity,
     )
@@ -268,12 +291,14 @@ async def telegram_send_daily_summary(request: Request, summary_key: str | None 
 async def execution_plan(
     request: Request,
     canonical_symbol: str,
+    exchanges: str | None = None,
     notional_usd: float = 1000,
     leverage: float = 2,
     holding_periods: int = 3,
     basis_risk_buffer_percent: float = 0.35,
 ) -> ExecutionPlanResponse:
-    snapshots = await request.app.state.market_store.get_snapshots()
+    selected_exchanges = _resolved_exchanges(request, exchanges)
+    snapshots = await _snapshots_for_exchanges(request, selected_exchanges)
     opportunities = build_opportunities(snapshots, request.app.state.settings)
     opportunity = next((item for item in opportunities if item.canonical_symbol == canonical_symbol), None)
     if opportunity is None:

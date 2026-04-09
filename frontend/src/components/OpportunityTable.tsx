@@ -8,11 +8,12 @@ import {
   intervalBadge,
   qualityBadges,
 } from "../lib/monitor";
-import type { ArbitrageOpportunity } from "../lib/types";
+import type { ArbitrageOpportunity, ExchangeName } from "../lib/types";
 
 interface OpportunityTableProps {
   opportunities: ArbitrageOpportunity[];
   selectedSymbol: string | null;
+  selectedExchanges: ExchangeName[];
   nowTimestamp: number;
   onSelect: (opportunity: ArbitrageOpportunity) => void;
 }
@@ -20,9 +21,15 @@ interface OpportunityTableProps {
 export function OpportunityTable({
   opportunities,
   selectedSymbol,
+  selectedExchanges,
   nowTimestamp,
   onSelect,
 }: OpportunityTableProps) {
+  const compareHref = (canonicalSymbol: string) => {
+    const query = selectedExchanges.length ? `?exchanges=${encodeURIComponent(selectedExchanges.join(","))}` : "";
+    return `/compare/${encodeURIComponent(canonicalSymbol)}${query}`;
+  };
+
   if (!opportunities.length) {
     return (
       <div className="empty-state table-empty-state">
@@ -99,7 +106,7 @@ export function OpportunityTable({
                         </button>
                         <a
                           className="overview-button compare-button-link"
-                          href={`/compare/${encodeURIComponent(opportunity.canonical_symbol)}`}
+                          href={compareHref(opportunity.canonical_symbol)}
                           onClick={(event) => event.stopPropagation()}
                         >
                           Compare
@@ -220,7 +227,7 @@ export function OpportunityTable({
                 <button type="button" className="overview-button" onClick={() => onSelect(opportunity)}>
                   Overview
                 </button>
-                <a className="overview-button compare-button-link" href={`/compare/${encodeURIComponent(opportunity.canonical_symbol)}`}>
+                <a className="overview-button compare-button-link" href={compareHref(opportunity.canonical_symbol)}>
                   Compare
                 </a>
               </div>

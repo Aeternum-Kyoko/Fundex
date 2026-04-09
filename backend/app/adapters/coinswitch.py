@@ -48,6 +48,10 @@ class CoinSwitchAdapter(ExchangeAdapter):
             if item.get("next_funding_timestamp"):
                 next_funding = datetime.fromtimestamp(item["next_funding_timestamp"] / 1000, tz=timezone.utc)
 
+            funding_rate = self._to_float(item.get("funding_rate"))
+            if funding_rate is None:
+                continue
+
             snapshots.append(
                 FundingSnapshot(
                     exchange=self.exchange,
@@ -55,20 +59,20 @@ class CoinSwitchAdapter(ExchangeAdapter):
                     canonical_symbol=canonical_symbol,
                     base_asset=base_asset,
                     quote_asset=quote_asset,
-                    funding_rate=float(item["funding_rate"]),
+                    funding_rate=funding_rate,
                     funding_interval_hours=8,
-                    mark_price=float(item["mark_price"]) if item.get("mark_price") is not None else None,
-                    index_price=float(item["index_price"]) if item.get("index_price") is not None else None,
-                    open_interest=float(item["open_interest"]) if item.get("open_interest") is not None else None,
-                    open_interest_usd=float(item["open_interest_value"]) if item.get("open_interest_value") is not None else None,
-                    volume_24h=float(item["quote_asset_volume_24h"]) if item.get("quote_asset_volume_24h") is not None else None,
+                    mark_price=self._to_float(item.get("mark_price")),
+                    index_price=self._to_float(item.get("index_price")),
+                    open_interest=self._to_float(item.get("open_interest")),
+                    open_interest_usd=self._to_float(item.get("open_interest_value")),
+                    volume_24h=self._to_float(item.get("quote_asset_volume_24h")),
                     next_funding_time=next_funding,
                     maker_fee_bps=self._maker_fee_bps,
                     taker_fee_bps=self._taker_fee_bps,
                     metadata={
                         "source": "coinswitch_all_pairs_ticker",
-                        "best_bid_size": float(item["best_bid_size"]) if item.get("best_bid_size") is not None else None,
-                        "best_ask_size": float(item["best_ask_size"]) if item.get("best_ask_size") is not None else None,
+                        "best_bid_size": self._to_float(item.get("best_bid_size")),
+                        "best_ask_size": self._to_float(item.get("best_ask_size")),
                     },
                 )
             )
@@ -94,3 +98,9 @@ class CoinSwitchAdapter(ExchangeAdapter):
         private_key = ed25519.Ed25519PrivateKey.from_private_bytes(secret_key_bytes)
         signature = private_key.sign(request_string).hex()
         return signature, request_path
+
+    @staticmethod
+    def _to_float(value: object) -> float | None:
+        if value in (None, ""):
+            return None
+        return float(value)

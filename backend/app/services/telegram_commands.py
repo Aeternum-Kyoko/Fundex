@@ -6,6 +6,7 @@ from app.core.config import Settings
 from app.models.market import ArbitrageOpportunity, FundingSnapshot
 from app.services.funding_leaders import build_funding_leaders
 from app.services.history_store import HistoryStore
+from app.services.opportunity_ranker import is_snapshot_usable
 from app.services.symbol_registry import build_symbol_aliases, normalize_symbol_query
 
 
@@ -52,6 +53,14 @@ def exchange_rate_lines(opportunity: ArbitrageOpportunity) -> list[str]:
 def exchange_symbol_lines(opportunity: ArbitrageOpportunity) -> list[str]:
     ordered_legs = sorted([opportunity.long_leg, opportunity.short_leg], key=lambda leg: leg.display_name)
     return [f"{leg.display_name} symbol - {leg.exchange_symbol}" for leg in ordered_legs]
+
+
+def format_funding_rate(rate: float | None) -> str:
+    if rate is None:
+        return "n/a"
+    if abs(rate) < 0.000005:
+        return "flat"
+    return f"{rate * 100:.3f}%"
 
 
 class TelegramCommandService:
@@ -315,10 +324,11 @@ class TelegramCommandService:
         if canonical_symbol is None:
             return error or f"I could not find <b>{query.upper()}</b>."
 
-        matching_snapshots = sorted(
-            [snapshot for snapshot in snapshots if snapshot.canonical_symbol == canonical_symbol],
-            key=lambda snapshot: (self._display_name(snapshot.exchange), snapshot.exchange_symbol),
-        )
+        matching_snapshots = [
+            snapshot
+            for snapshot in snapshots
+            if snapshot.canonical_symbol == canonical_symbol and is_snapshot_usable(snapshot)
+        ]
         if not matching_snapshots:
             return f"No live exchange snapshots are available for <b>{canonical_symbol}</b> right now."
 
@@ -326,13 +336,18 @@ class TelegramCommandService:
         opportunity = next((item for item in opportunities if item.canonical_symbol == canonical_symbol), None)
 
         parts = [f"<b>{canonical_symbol}</b>", "", "<b>Exchange comparison</b>"]
-        for snapshot in matching_snapshots:
+        snapshot_map = {snapshot.exchange: snapshot for snapshot in matching_snapshots}
+        for exchange in self.settings.enabled_exchange_names:
+            snapshot = snapshot_map.get(exchange)
+            parts.extend(["", f"<b>{self._display_name(exchange)}</b>"])
+            if snapshot is None:
+                parts.append("Not listed right now for this symbol.")
+                continue
+
             parts.extend(
                 [
-                    "",
-                    f"<b>{self._display_name(snapshot.exchange)}</b>",
                     f"Symbol - {snapshot.exchange_symbol}",
-                    f"Funding rate - {snapshot.funding_rate * 100:.3f}%",
+                    f"Funding rate - {format_funding_rate(snapshot.funding_rate)}",
                     f"Mark price - {self._format_number(snapshot.mark_price)}",
                     f"Open interest - {self._format_usd(snapshot.open_interest_usd)}",
                     f"Next funding - {format_countdown(snapshot.next_funding_time, now)}",

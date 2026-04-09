@@ -135,6 +135,7 @@ export interface SymbolComparisonResponse {
   base_asset: string;
   quote_asset: string;
   total_exchanges: number;
+  requested_exchanges: ExchangeName[];
   exchanges: SymbolComparisonExchangeSnapshot[];
   best_opportunity: ArbitrageOpportunity | null;
 }
