@@ -78,10 +78,8 @@ class MarketEngine:
             try:
                 snapshots = await adapter.fetch_snapshots()
                 await self.store.update_exchange(adapter.exchange, adapter.display_name, snapshots)
-                await self.history_store.save_snapshots(snapshots)
                 all_snapshots = await self.store.get_snapshots()
                 opportunities = build_opportunities(all_snapshots, self.settings)
-                await self.history_store.save_opportunities(opportunities)
                 await self._prune_if_due()
                 await self.telegram_notifier.notify(opportunities)
                 if await self._daily_summary_ready():

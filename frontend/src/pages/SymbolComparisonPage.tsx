@@ -1,9 +1,5 @@
 import { useMemo } from "react";
-import { FundingTrendChart } from "../components/FundingTrendChart";
-import { OpportunityHistoryChart } from "../components/OpportunityHistoryChart";
 import { useExecutionPlan } from "../hooks/useExecutionPlan";
-import { useFundingTrends } from "../hooks/useFundingTrends";
-import { useOpportunityHistory } from "../hooks/useOpportunityHistory";
 import { useSymbolComparison } from "../hooks/useSymbolComparison";
 import { exchangeToneClass, explainNoPair, formatCountdown, formatPct, formatTimestamp, formatUsd } from "../lib/monitor";
 
@@ -45,19 +41,6 @@ function buildExchangeDiagnostics(exchange: {
 
 export function SymbolComparisonPage({ canonicalSymbol }: { canonicalSymbol: string }) {
   const { comparison, loading, error } = useSymbolComparison(canonicalSymbol);
-  const exchangeNames = useMemo(
-    () => comparison?.exchanges.map((exchange) => exchange.exchange) ?? [],
-    [comparison],
-  );
-  const { series, loading: trendsLoading } = useFundingTrends(
-    comparison ? [comparison.canonical_symbol] : [],
-    exchangeNames,
-    24,
-  );
-  const { points: opportunityHistory, loading: historyLoading } = useOpportunityHistory(
-    comparison?.canonical_symbol ?? null,
-    64,
-  );
 
   const bestOpportunity = comparison?.best_opportunity ?? null;
   const { plan, loading: planLoading } = useExecutionPlan(bestOpportunity?.canonical_symbol ?? null, Boolean(bestOpportunity));
@@ -91,7 +74,7 @@ export function SymbolComparisonPage({ canonicalSymbol }: { canonicalSymbol: str
           <h1>{comparison?.canonical_symbol ?? canonicalSymbol}</h1>
           <p className="lede">
             One symbol across every active exchange, with live funding, mark, fees, next funding timing, confidence, and
-            per-exchange funding history in one place.
+            manual action guidance in one place.
           </p>
           <div className="compare-top-actions">
             <a href="/" className="action-button secondary-button compare-link">
@@ -388,31 +371,6 @@ export function SymbolComparisonPage({ canonicalSymbol }: { canonicalSymbol: str
             )}
           </section>
 
-          <section className="panel compare-panel">
-            <div className="panel-header">
-              <div>
-                <p className="eyebrow">Spread History</p>
-                <h2>Spread, net APR, and confidence</h2>
-                <div className="subtle">Historical spread quality for this symbol based on the live opportunity engine.</div>
-              </div>
-              <div className="panel-note">{historyLoading ? "Loading history" : `${opportunityHistory.length} points`}</div>
-            </div>
-
-            <OpportunityHistoryChart points={opportunityHistory} />
-          </section>
-
-          <section className="panel compare-panel">
-            <div className="panel-header">
-              <div>
-                <p className="eyebrow">Funding History</p>
-                <h2>Per-exchange funding lines</h2>
-                <div className="subtle">Historical funding snapshots for this symbol across Binance, Delta, and CoinDCX.</div>
-              </div>
-              <div className="panel-note">{trendsLoading ? "Loading history" : `${series.length} series`}</div>
-            </div>
-
-            <FundingTrendChart series={series} />
-          </section>
         </>
       ) : null}
     </main>

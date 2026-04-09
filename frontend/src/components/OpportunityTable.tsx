@@ -13,19 +13,15 @@ import type { ArbitrageOpportunity } from "../lib/types";
 interface OpportunityTableProps {
   opportunities: ArbitrageOpportunity[];
   selectedSymbol: string | null;
-  watchlist: string[];
   nowTimestamp: number;
   onSelect: (opportunity: ArbitrageOpportunity) => void;
-  onToggleWatchlist: (symbol: string) => void;
 }
 
 export function OpportunityTable({
   opportunities,
   selectedSymbol,
-  watchlist,
   nowTimestamp,
   onSelect,
-  onToggleWatchlist,
 }: OpportunityTableProps) {
   if (!opportunities.length) {
     return (
@@ -58,7 +54,6 @@ export function OpportunityTable({
           <tbody>
             {opportunities.map((opportunity) => {
               const active = opportunity.canonical_symbol === selectedSymbol;
-              const watched = watchlist.includes(opportunity.canonical_symbol);
               const nextFunding = getNextFundingTime(opportunity);
               const badges = qualityBadges(opportunity);
 
@@ -92,16 +87,6 @@ export function OpportunityTable({
                         <div className="subtle">{opportunity.canonical_symbol}</div>
                       </div>
                       <div className="coin-actions">
-                        <button
-                          type="button"
-                          className={watched ? "watch-button active-watch" : "watch-button"}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            onToggleWatchlist(opportunity.canonical_symbol);
-                          }}
-                        >
-                          {watched ? "Watching" : "Watch"}
-                        </button>
                         <button
                           type="button"
                           className="overview-button"
@@ -169,7 +154,6 @@ export function OpportunityTable({
 
       <div className="mobile-opportunity-list">
         {opportunities.map((opportunity) => {
-          const watched = watchlist.includes(opportunity.canonical_symbol);
           const active = opportunity.canonical_symbol === selectedSymbol;
           const nextFunding = getNextFundingTime(opportunity);
 
@@ -233,13 +217,6 @@ export function OpportunityTable({
               </button>
 
               <div className="mobile-card-actions">
-                <button
-                  type="button"
-                  className={watched ? "watch-button active-watch" : "watch-button"}
-                  onClick={() => onToggleWatchlist(opportunity.canonical_symbol)}
-                >
-                  {watched ? "Pinned" : "Pin"}
-                </button>
                 <button type="button" className="overview-button" onClick={() => onSelect(opportunity)}>
                   Overview
                 </button>

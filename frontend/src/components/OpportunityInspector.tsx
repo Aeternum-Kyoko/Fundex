@@ -1,28 +1,19 @@
 import { useEffect } from "react";
 import { formatCountdown, formatPct, formatTimestamp, formatUsd, getNextFundingTime } from "../lib/monitor";
-import type { ArbitrageOpportunity, OpportunityHistoryResponse } from "../lib/types";
-import { HistoryChart } from "./HistoryChart";
+import type { ArbitrageOpportunity } from "../lib/types";
 
 interface OpportunityInspectorProps {
   opportunity: ArbitrageOpportunity | null;
-  history: OpportunityHistoryResponse | null;
-  loading: boolean;
   isOpen: boolean;
-  isWatched: boolean;
   nowTimestamp: number;
   onClose: () => void;
-  onToggleWatchlist: (symbol: string) => void;
 }
 
 export function OpportunityInspector({
   opportunity,
-  history,
-  loading,
   isOpen,
-  isWatched,
   nowTimestamp,
   onClose,
-  onToggleWatchlist,
 }: OpportunityInspectorProps) {
   useEffect(() => {
     if (!isOpen) {
@@ -70,13 +61,6 @@ export function OpportunityInspector({
             </p>
           </div>
           <div className="inspector-actions">
-            <button
-              type="button"
-              className={isWatched ? "watch-button active-watch" : "watch-button"}
-              onClick={() => onToggleWatchlist(opportunity.canonical_symbol)}
-            >
-              {isWatched ? "Watching" : "Watch"}
-            </button>
             <div className={opportunity.net_apr_percent >= 0 ? "phase-pill" : "overview-badge negative-badge"}>
               {formatPct(opportunity.net_apr_percent)}
             </div>
@@ -186,13 +170,6 @@ export function OpportunityInspector({
           </section>
         </div>
 
-        <div className="history-section">
-          <div className="status-topline">
-            <strong>Spread history</strong>
-            <span className="subtle">{loading ? "Loading..." : `${history?.total ?? 0} persisted points`}</span>
-          </div>
-          <HistoryChart points={history?.points ?? []} />
-        </div>
       </aside>
     </div>
   );

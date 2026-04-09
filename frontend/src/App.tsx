@@ -4,9 +4,7 @@ import { FundingSettlementBoard } from "./components/FundingSettlementBoard";
 import { FundingLeadersSkeleton, OpportunityTableSkeleton } from "./components/LoadingSkeletons";
 import { OpportunityInspector } from "./components/OpportunityInspector";
 import { OpportunityTable } from "./components/OpportunityTable";
-import { useFundingTrends } from "./hooks/useFundingTrends";
 import { useMarketFeed } from "./hooks/useMarketFeed";
-import { useOpportunityHistory } from "./hooks/useOpportunityHistory";
 import {
   buildOpportunityCsv,
   formatCountdown,
@@ -14,9 +12,8 @@ import {
   formatTimestamp,
   getNextFundingTime,
 } from "./lib/monitor";
-import type { ArbitrageOpportunity, FundingTrendPoint } from "./lib/types";
+import type { ArbitrageOpportunity } from "./lib/types";
 
-const WATCHLIST_KEY = "arbradar-watchlist";
 const ALERTS_KEY = "arbradar-alerts";
 const REFRESH_KEY = "arbradar-refresh";
 const NOTIFICATIONS_KEY = "arbradar-notifications";
@@ -25,7 +22,6 @@ const ALERT_HISTORY_KEY = "arbradar-alert-history";
 interface AlertPreferences {
   minSpreadPercent: number;
   minNetAprPercent: number;
-  watchlistOnly: boolean;
 }
 
 interface NotificationPreferences {
@@ -49,7 +45,6 @@ interface ExchangeHealthBadge {
 const defaultAlertPreferences: AlertPreferences = {
   minSpreadPercent: 0.08,
   minNetAprPercent: 10,
-  watchlistOnly: true,
 };
 
 const defaultNotificationPreferences: NotificationPreferences = {
@@ -63,24 +58,6 @@ function averageConfidence(opportunities: ArbitrageOpportunity[]) {
   }
 
   return opportunities.reduce((total, item) => total + item.confidence_score, 0) / opportunities.length;
-}
-
-function readStoredArray(key: string) {
-  if (typeof window === "undefined") {
-    return [];
-  }
-
-  try {
-    const raw = window.localStorage.getItem(key);
-    if (!raw) {
-      return [];
-    }
-
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
-  } catch {
-    return [];
-  }
 }
 
 function readStoredObject<T>(key: string, fallback: T) {
@@ -203,7 +180,6 @@ export function App() {
   const [isOverviewOpen, setIsOverviewOpen] = useState(false);
   const [nowTimestamp, setNowTimestamp] = useState(Date.now());
   const [refreshIntervalMs, setRefreshIntervalMs] = useState(() => readStoredNumber(REFRESH_KEY, 5000));
-  const [watchlist, setWatchlist] = useState<string[]>(() => readStoredArray(WATCHLIST_KEY));
   const [alertPreferences, setAlertPreferences] = useState<AlertPreferences>(() =>
     readStoredObject(ALERTS_KEY, defaultAlertPreferences),
   );
@@ -220,34 +196,10 @@ export function App() {
     useMarketFeed(refreshIntervalMs);
   const deferredSearch = useDeferredValue(search);
 
-  const fundingLeaderSymbols = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          fundingLeaders.flatMap((exchange) =>
-            [...exchange.top_positive, ...exchange.top_negative].map((leader) => leader.canonical_symbol),
-          ),
-        ),
-      ),
-    [fundingLeaders],
-  );
-  const activeExchanges = useMemo(
-    () => (data.exchanges_in_backend.length ? data.exchanges_in_backend : statuses.map((status) => status.exchange)),
-    [data.exchanges_in_backend, statuses],
-  );
-  const { series: fundingTrendSeries, loading: fundingTrendLoading } = useFundingTrends(
-    fundingLeaderSymbols,
-    activeExchanges,
-  );
-
   useEffect(() => {
     recentAlertsRef.current = recentAlerts;
     window.localStorage.setItem(ALERT_HISTORY_KEY, JSON.stringify(recentAlerts));
   }, [recentAlerts]);
-
-  useEffect(() => {
-    window.localStorage.setItem(WATCHLIST_KEY, JSON.stringify(watchlist));
-  }, [watchlist]);
 
   useEffect(() => {
     window.localStorage.setItem(ALERTS_KEY, JSON.stringify(alertPreferences));
@@ -282,8 +234,6 @@ export function App() {
           return opportunity.net_apr_percent < 0;
         case "high-confidence":
           return opportunity.confidence_score >= 0.75;
-        case "watchlist":
-          return watchlist.includes(opportunity.canonical_symbol);
         case "alerts":
           return true;
         case "wide-spread":
@@ -327,28 +277,14 @@ export function App() {
           return Math.abs(right.spread_rate) - Math.abs(left.spread_rate);
       }
     });
-  }, [data.opportunities, deferredSearch, sortBy, viewFilter, watchlist]);
+  }, [data.opportunities, deferredSearch, sortBy, viewFilter]);
 
   const opportunityMap = useMemo(
     () => new Map(data.opportunities.map((opportunity) => [opportunity.canonical_symbol, opportunity])),
     [data.opportunities],
   );
 
-  const watchlistOpportunities = useMemo(
-    () => watchlist.map((symbol) => opportunityMap.get(symbol)).filter((item): item is ArbitrageOpportunity => Boolean(item)),
-    [opportunityMap, watchlist],
-  );
-
-  const fundingTrendMap = useMemo(() => {
-    const map: Record<string, Record<string, FundingTrendPoint[]>> = {};
-    fundingTrendSeries.forEach((entry) => {
-      map[entry.canonical_symbol] ??= {};
-      map[entry.canonical_symbol][entry.exchange] = entry.points;
-    });
-    return map;
-  }, [fundingTrendSeries]);
-
-  const alertSource = alertPreferences.watchlistOnly ? watchlistOpportunities : filteredOpportunities;
+  const alertSource = filteredOpportunities;
   const activeAlerts = useMemo(() => {
     return alertSource
       .map((opportunity) => {
@@ -429,8 +365,6 @@ export function App() {
     }
   }, [activeAlerts, notificationPermission, notificationPreferences.cooldownMinutes, notificationPreferences.enabled, nowTimestamp]);
 
-  const { history, loading } = useOpportunityHistory(selectedOpportunity?.canonical_symbol ?? null);
-
   const openOverview = (opportunity: ArbitrageOpportunity) => {
     setSelectedSymbol(opportunity.canonical_symbol);
     setIsOverviewOpen(true);
@@ -442,10 +376,6 @@ export function App() {
       return;
     }
     openOverview(opportunity);
-  };
-
-  const toggleWatchlist = (symbol: string) => {
-    setWatchlist((current) => (current.includes(symbol) ? current.filter((item) => item !== symbol) : [...current, symbol]));
   };
 
   const requestNotificationPermission = async () => {
@@ -463,10 +393,6 @@ export function App() {
 
   const exportVisibleRows = () => {
     downloadCsv(buildOpportunityCsv(visibleOpportunities), `arbradar-visible-${new Date().toISOString().slice(0, 19)}.csv`);
-  };
-
-  const exportWatchlistRows = () => {
-    downloadCsv(buildOpportunityCsv(watchlistOpportunities), `arbradar-watchlist-${new Date().toISOString().slice(0, 19)}.csv`);
   };
 
   const summary = useMemo(() => {
@@ -559,12 +485,8 @@ export function App() {
         <section id="leaders">
           <FundingLeadersPanel
             exchanges={fundingLeaders}
-            pinnedSymbols={watchlist}
-            trendMap={fundingTrendMap}
-            trendLoading={fundingTrendLoading}
             nowTimestamp={nowTimestamp}
             onOpenSymbol={openOverviewBySymbol}
-            onTogglePin={toggleWatchlist}
           />
         </section>
       )}
@@ -577,53 +499,10 @@ export function App() {
         <section className="overview-card">
           <div className="overview-card-header">
             <div>
-              <p className="eyebrow">Watchlist</p>
-              <strong>{watchlistOpportunities.length} saved symbols</strong>
-            </div>
-            <span className="subtle">Open any card for full overview</span>
-          </div>
-
-          {watchlistOpportunities.length ? (
-            <div className="watchlist-grid">
-              {watchlistOpportunities.map((opportunity) => {
-                const nextFunding = getNextFundingTime(opportunity);
-                return (
-                  <button
-                    type="button"
-                    key={opportunity.canonical_symbol}
-                    className="watchlist-card"
-                    onClick={() => openOverview(opportunity)}
-                  >
-                    <div className="watchlist-card-top">
-                      <strong>{opportunity.canonical_symbol}</strong>
-                      <span className={opportunity.net_apr_percent >= 0 ? "positive" : "negative"}>
-                        {formatPct(opportunity.net_apr_percent)}
-                      </span>
-                    </div>
-                    <div className="subtle">Lower on {opportunity.long_leg.display_name}</div>
-                    <div className="watchlist-meta">
-                      <span>{formatPct(opportunity.spread_rate * 100, 3)} spread</span>
-                      <span>{formatCountdown(nextFunding, nowTimestamp)}</span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="empty-state compact-empty">
-              <p>Your watchlist is empty.</p>
-              <span>Use Pin from the funding boards or Watch from the table to save symbols here.</span>
-            </div>
-          )}
-        </section>
-
-        <section className="overview-card">
-          <div className="overview-card-header">
-            <div>
               <p className="eyebrow">Alert Center</p>
               <strong>{activeAlerts.length} active alerts</strong>
             </div>
-            <span className="subtle">{alertPreferences.watchlistOnly ? "Watching saved symbols only" : "Watching all visible rows"}</span>
+            <span className="subtle">Watching all visible live rows.</span>
           </div>
 
           <div className="alert-controls">
@@ -655,19 +534,6 @@ export function App() {
                 }
               />
             </label>
-            <label className="toggle-row">
-              <input
-                type="checkbox"
-                checked={alertPreferences.watchlistOnly}
-                onChange={(event) =>
-                  setAlertPreferences((current) => ({
-                    ...current,
-                    watchlistOnly: event.target.checked,
-                  }))
-                }
-              />
-              <span>Watchlist only</span>
-            </label>
           </div>
 
           {activeAlerts.length ? (
@@ -690,7 +556,7 @@ export function App() {
           ) : (
             <div className="empty-state compact-empty">
               <p>No active alerts right now.</p>
-              <span>Lower the thresholds or add more symbols to the watchlist to make this more sensitive.</span>
+              <span>Lower the thresholds if you want the live monitor to flag more rows.</span>
             </div>
           )}
         </section>
@@ -738,9 +604,6 @@ export function App() {
               </button>
               <button type="button" className="action-button" onClick={exportVisibleRows}>
                 Export visible CSV
-              </button>
-              <button type="button" className="action-button" onClick={exportWatchlistRows}>
-                Export watchlist CSV
               </button>
             </div>
             <div className="notification-row">
@@ -848,7 +711,6 @@ export function App() {
               <span className="subtle">View</span>
               <select value={viewFilter} onChange={(event) => setViewFilter(event.target.value)}>
                 <option value="all">All rows</option>
-                <option value="watchlist">Watchlist</option>
                 <option value="alerts">Alerted rows</option>
                 <option value="positive">Positive net APR</option>
                 <option value="negative">Negative net APR</option>
@@ -872,10 +734,8 @@ export function App() {
             </label>
 
             <div className="toolbar-stat">
-              <span className="subtle">Watchlist / alerts</span>
-              <strong>
-                {watchlistOpportunities.length} / {activeAlerts.length}
-              </strong>
+              <span className="subtle">Visible alerts</span>
+              <strong>{activeAlerts.length}</strong>
             </div>
             <div className="toolbar-actions">
               <button type="button" className="action-button" onClick={() => void refresh()}>
@@ -893,10 +753,8 @@ export function App() {
             <OpportunityTable
               opportunities={visibleOpportunities}
               selectedSymbol={selectedOpportunity?.canonical_symbol ?? null}
-              watchlist={watchlist}
               nowTimestamp={nowTimestamp}
               onSelect={openOverview}
-              onToggleWatchlist={toggleWatchlist}
             />
           )}
         </section>
@@ -904,13 +762,9 @@ export function App() {
 
       <OpportunityInspector
         opportunity={selectedOpportunity}
-        history={history}
-        loading={loading}
         isOpen={isOverviewOpen}
-        isWatched={selectedOpportunity ? watchlist.includes(selectedOpportunity.canonical_symbol) : false}
         nowTimestamp={nowTimestamp}
         onClose={() => setIsOverviewOpen(false)}
-        onToggleWatchlist={toggleWatchlist}
       />
     </main>
   );
