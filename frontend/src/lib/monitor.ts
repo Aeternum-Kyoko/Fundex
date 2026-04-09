@@ -1,4 +1,4 @@
-import type { ArbitrageOpportunity } from "./types";
+import type { ArbitrageOpportunity, ExchangeName, FundingSettlementItem, SymbolComparisonExchangeSnapshot } from "./types";
 
 export function formatPct(value: number, digits = 2) {
   return `${value.toFixed(digits)}%`;
@@ -93,4 +93,100 @@ export function buildOpportunityCsv(opportunities: ArbitrageOpportunity[]) {
   return [headers.join(","), ...rows.map((row) => headers.map((header) => escapeCell(row[header as keyof typeof row])).join(","))].join(
     "\n",
   );
+}
+
+export function exchangeToneClass(exchange: ExchangeName) {
+  switch (exchange) {
+    case "binance":
+      return "exchange-binance";
+    case "delta":
+      return "exchange-delta";
+    case "coindcx":
+      return "exchange-coindcx";
+    case "coinswitch":
+      return "exchange-coinswitch";
+    default:
+      return "";
+  }
+}
+
+export function exchangeLabel(exchange: ExchangeName) {
+  switch (exchange) {
+    case "binance":
+      return "Binance";
+    case "delta":
+      return "Delta";
+    case "coindcx":
+      return "CoinDCX";
+    case "coinswitch":
+      return "CoinSwitch";
+    default:
+      return exchange;
+  }
+}
+
+export function intervalBadge(intervalHours: number | null | undefined) {
+  if (!intervalHours) {
+    return "n/a";
+  }
+  return `${intervalHours}h`;
+}
+
+export function qualityBadges(opportunity: ArbitrageOpportunity) {
+  const badges: Array<{ label: string; tone: "positive" | "warning" | "danger" | "neutral" }> = [];
+
+  if (opportunity.confidence_score >= 0.82 && (opportunity.combined_open_interest_usd ?? 0) >= 2_000_000) {
+    badges.push({ label: "Strong", tone: "positive" });
+  }
+  if ((opportunity.combined_open_interest_usd ?? 0) < 1_000_000) {
+    badges.push({ label: "Low OI", tone: "warning" });
+  }
+  if ((opportunity.max_leg_age_seconds ?? 999) > 30) {
+    badges.push({ label: "Stale", tone: "danger" });
+  }
+  if (Math.abs(opportunity.spread_rate) >= 0.0035) {
+    badges.push({ label: "High spread", tone: "neutral" });
+  }
+  if (!badges.length) {
+    badges.push({ label: "Live", tone: "neutral" });
+  }
+
+  return badges.slice(0, 3);
+}
+
+export function settlementBucket(item: FundingSettlementItem, nowTimestamp = Date.now()) {
+  const next = item.next_funding_time ? new Date(item.next_funding_time).getTime() : Number.POSITIVE_INFINITY;
+  const remainingMinutes = (next - nowTimestamp) / 60_000;
+  if (remainingMinutes <= 15) {
+    return "due-soon";
+  }
+  if (remainingMinutes <= 60) {
+    return "next-hour";
+  }
+  return "later";
+}
+
+export function explainNoPair(exchanges: SymbolComparisonExchangeSnapshot[]) {
+  if (!exchanges.length) {
+    return "This symbol is not in the live comparison set right now.";
+  }
+  const missingFundingTime = exchanges.some((exchange) => !exchange.next_funding_time);
+  const stale = exchanges.every((exchange) => (exchange.data_age_seconds ?? 999) > 45);
+  const missingOi = exchanges.every((exchange) => exchange.open_interest_usd == null);
+  const rates = exchanges.map((exchange) => exchange.funding_rate);
+  const spread = rates.length > 1 ? Math.max(...rates) - Math.min(...rates) : 0;
+
+  if (stale) {
+    return "Live snapshots are currently stale, so a clean pair is being withheld.";
+  }
+  if (missingFundingTime) {
+    return "One or more exchanges are missing funding timing, so the pair timing is not trustworthy yet.";
+  }
+  if (missingOi) {
+    return "Open interest is missing across the available venues, so the pair is present but quality is weak.";
+  }
+  if (spread <= 0) {
+    return "There is no positive cross-exchange funding edge right now.";
+  }
+  return "The symbol is live, but the current spread does not clear the quality filters for a best pair.";
 }

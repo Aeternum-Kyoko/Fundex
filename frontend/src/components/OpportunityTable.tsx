@@ -1,4 +1,13 @@
-import { formatCountdown, formatPct, formatUsd, getNextFundingTime } from "../lib/monitor";
+import {
+  exchangeLabel,
+  exchangeToneClass,
+  formatCountdown,
+  formatPct,
+  formatUsd,
+  getNextFundingTime,
+  intervalBadge,
+  qualityBadges,
+} from "../lib/monitor";
 import type { ArbitrageOpportunity } from "../lib/types";
 
 interface OpportunityTableProps {
@@ -20,9 +29,9 @@ export function OpportunityTable({
 }: OpportunityTableProps) {
   if (!opportunities.length) {
     return (
-      <div className="empty-state">
-        <p>No rows match the current search and filter settings.</p>
-        <span>Clear the search or switch the filter back to All rows to widen the monitor.</span>
+      <div className="empty-state table-empty-state">
+        <p>No rows match the current desk filters.</p>
+        <span>Try clearing search, widening the view filter, or switching sort away from the narrowest setup.</span>
       </div>
     );
   }
@@ -51,6 +60,7 @@ export function OpportunityTable({
               const active = opportunity.canonical_symbol === selectedSymbol;
               const watched = watchlist.includes(opportunity.canonical_symbol);
               const nextFunding = getNextFundingTime(opportunity);
+              const badges = qualityBadges(opportunity);
 
               return (
                 <tr
@@ -68,8 +78,17 @@ export function OpportunityTable({
                 >
                   <td className="sticky-column coin-column">
                     <div className="coin-cell">
-                      <div>
-                        <strong>{opportunity.base_asset}</strong>
+                      <div className="coin-primary">
+                        <div className="coin-title-row">
+                          <strong>{opportunity.base_asset}</strong>
+                          <div className="quality-badge-row">
+                            {badges.map((badge) => (
+                              <span key={badge.label} className={`quality-badge quality-${badge.tone}`}>
+                                {badge.label}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
                         <div className="subtle">{opportunity.canonical_symbol}</div>
                       </div>
                       <div className="coin-actions">
@@ -104,17 +123,25 @@ export function OpportunityTable({
                     </div>
                   </td>
                   <td>
-                    <div className="table-pill">{opportunity.long_leg.display_name}</div>
+                    <div className={`table-pill ${exchangeToneClass(opportunity.long_leg.exchange)}`}>
+                      {exchangeLabel(opportunity.long_leg.exchange)}
+                    </div>
                     <strong>{opportunity.long_leg.display_name}</strong>
-                    <div className="subtle">{opportunity.long_leg.exchange_symbol}</div>
+                    <div className="subtle">
+                      {opportunity.long_leg.exchange_symbol} · {intervalBadge(opportunity.funding_interval_hours)}
+                    </div>
                   </td>
                   <td className={opportunity.long_leg.funding_rate >= 0 ? "positive" : "negative"}>
                     {formatPct(opportunity.long_leg.funding_rate * 100, 3)}
                   </td>
                   <td>
-                    <div className="table-pill">{opportunity.short_leg.display_name}</div>
+                    <div className={`table-pill ${exchangeToneClass(opportunity.short_leg.exchange)}`}>
+                      {exchangeLabel(opportunity.short_leg.exchange)}
+                    </div>
                     <strong>{opportunity.short_leg.display_name}</strong>
-                    <div className="subtle">{opportunity.short_leg.exchange_symbol}</div>
+                    <div className="subtle">
+                      {opportunity.short_leg.exchange_symbol} · {intervalBadge(opportunity.funding_interval_hours)}
+                    </div>
                   </td>
                   <td className={opportunity.short_leg.funding_rate >= 0 ? "positive" : "negative"}>
                     {formatPct(opportunity.short_leg.funding_rate * 100, 3)}
@@ -156,6 +183,13 @@ export function OpportunityTable({
                   <div>
                     <strong>{opportunity.base_asset}</strong>
                     <div className="subtle">{opportunity.canonical_symbol}</div>
+                    <div className="quality-badge-row mobile-quality-row">
+                      {qualityBadges(opportunity).map((badge) => (
+                        <span key={badge.label} className={`quality-badge quality-${badge.tone}`}>
+                          {badge.label}
+                        </span>
+                      ))}
+                    </div>
                   </div>
                   <span className={opportunity.net_apr_percent >= 0 ? "positive" : "negative"}>
                     {formatPct(opportunity.net_apr_percent)}
@@ -164,13 +198,17 @@ export function OpportunityTable({
 
                 <div className="mobile-card-grid">
                   <div>
-                    <span className="subtle">{opportunity.long_leg.display_name}</span>
+                    <span className="subtle">
+                      {opportunity.long_leg.display_name} · {intervalBadge(opportunity.funding_interval_hours)}
+                    </span>
                     <strong className={opportunity.long_leg.funding_rate >= 0 ? "positive" : "negative"}>
                       {formatPct(opportunity.long_leg.funding_rate * 100, 3)}
                     </strong>
                   </div>
                   <div>
-                    <span className="subtle">{opportunity.short_leg.display_name}</span>
+                    <span className="subtle">
+                      {opportunity.short_leg.display_name} · {intervalBadge(opportunity.funding_interval_hours)}
+                    </span>
                     <strong className={opportunity.short_leg.funding_rate >= 0 ? "positive" : "negative"}>
                       {formatPct(opportunity.short_leg.funding_rate * 100, 3)}
                     </strong>

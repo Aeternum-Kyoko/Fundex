@@ -5,7 +5,7 @@ import { useExecutionPlan } from "../hooks/useExecutionPlan";
 import { useFundingTrends } from "../hooks/useFundingTrends";
 import { useOpportunityHistory } from "../hooks/useOpportunityHistory";
 import { useSymbolComparison } from "../hooks/useSymbolComparison";
-import { formatCountdown, formatPct, formatTimestamp, formatUsd } from "../lib/monitor";
+import { exchangeToneClass, explainNoPair, formatCountdown, formatPct, formatTimestamp, formatUsd } from "../lib/monitor";
 
 function buildExchangeDiagnostics(exchange: {
   data_age_seconds: number | null;
@@ -62,6 +62,10 @@ export function SymbolComparisonPage({ canonicalSymbol }: { canonicalSymbol: str
   const bestOpportunity = comparison?.best_opportunity ?? null;
   const { plan, loading: planLoading } = useExecutionPlan(bestOpportunity?.canonical_symbol ?? null, Boolean(bestOpportunity));
   const nowTimestamp = Date.now();
+  const noPairReason = useMemo(
+    () => (comparison && !bestOpportunity ? explainNoPair(comparison.exchanges) : null),
+    [bestOpportunity, comparison],
+  );
   const pairFundingTime = useMemo(() => {
     if (!bestOpportunity) {
       return null;
@@ -96,20 +100,31 @@ export function SymbolComparisonPage({ canonicalSymbol }: { canonicalSymbol: str
           </div>
         </div>
 
-        <div className="hero-card">
+        <div className="hero-card compare-hero-card">
           <span className="chip">Best live pair</span>
           {bestOpportunity ? (
             <>
-              <strong>{formatPct(bestOpportunity.spread_rate * 100, 3)}</strong>
+              <div className="compare-hero-callout">
+                <strong>{formatPct(bestOpportunity.spread_rate * 100, 3)}</strong>
+                <span>{formatPct(bestOpportunity.net_apr_percent)} net APR</span>
+              </div>
               <p>
                 Long on {bestOpportunity.long_leg.display_name}, short on {bestOpportunity.short_leg.display_name}, with{" "}
                 {(bestOpportunity.confidence_score * 100).toFixed(0)}/100 confidence.
               </p>
+              <div className="best-pair-strip">
+                <div className={`best-pair-leg ${exchangeToneClass(bestOpportunity.long_leg.exchange)}`}>
+                  Long {bestOpportunity.long_leg.display_name}
+                </div>
+                <div className={`best-pair-leg ${exchangeToneClass(bestOpportunity.short_leg.exchange)}`}>
+                  Short {bestOpportunity.short_leg.display_name}
+                </div>
+              </div>
             </>
           ) : (
             <>
               <strong>No active pair</strong>
-              <p>This symbol is live, but there is no positive cross-exchange funding pair right now.</p>
+              <p>{noPairReason}</p>
             </>
           )}
         </div>
@@ -163,7 +178,10 @@ export function SymbolComparisonPage({ canonicalSymbol }: { canonicalSymbol: str
 
             <div className="compare-card-grid">
               {comparison.exchanges.map((exchange) => (
-                <article className="overview-card compare-exchange-card" key={`${exchange.exchange}-${exchange.exchange_symbol}`}>
+                <article
+                  className={`overview-card compare-exchange-card ${exchangeToneClass(exchange.exchange)}`}
+                  key={`${exchange.exchange}-${exchange.exchange_symbol}`}
+                >
                   <div className="overview-card-header">
                     <div>
                       <p className="eyebrow">Exchange</p>

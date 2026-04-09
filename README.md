@@ -1,6 +1,6 @@
 # ArbRadar - Binance vs Delta Funding Monitor
 
-ArbRadar is a monitor-first funding spread dashboard for `Binance` and `Delta Exchange India`. It tracks live funding differences, ranks opportunities, stores short-term history, and sends Telegram alerts when high-quality spreads enter or exit the qualified alert set.
+ArbRadar is a monitor-first funding spread dashboard for `Binance`, `Delta Exchange India`, and `CoinDCX`. It tracks live funding differences, ranks opportunities, stores short-term history, and sends Telegram alerts when high-quality spreads enter or exit the qualified alert set.
 
 ## Current Phase
 
@@ -9,11 +9,12 @@ We are in `Phase 4 - Monitor Operations`.
 This build is for monitoring and alerting only:
 
 - live Binance and Delta public market-data ingestion
+- live CoinDCX public market-data ingestion
 - funding-spread ranking
 - exchange health and runtime metrics
 - history persistence in SQLite
-- dark dashboard with watchlists, overview modal, funding leaders, trends, mobile mode, and CSV export
-- Telegram bot commands and stateful alerting
+- dark dashboard with watchlists, overview modal, funding leaders, funding settlement board, trends, mobile mode, and CSV export
+- Telegram bot commands, stateful alerting, and scheduled summaries
 
 ## Stack
 
@@ -121,6 +122,18 @@ Telegram settings:
 - `TELEGRAM_TOP_N`
 - `TELEGRAM_COOLDOWN_MINUTES`
 - `TELEGRAM_POLL_INTERVAL_SECONDS`
+- `TELEGRAM_DAILY_SUMMARY_ENABLED`
+- `TELEGRAM_DAILY_SUMMARY_TIMEZONE`
+- `TELEGRAM_DAILY_SUMMARY_TOP_N`
+- `TELEGRAM_MORNING_SUMMARY_ENABLED`
+- `TELEGRAM_MORNING_SUMMARY_HOUR`
+- `TELEGRAM_MORNING_SUMMARY_MINUTE`
+- `TELEGRAM_EVENING_SUMMARY_ENABLED`
+- `TELEGRAM_EVENING_SUMMARY_HOUR`
+- `TELEGRAM_EVENING_SUMMARY_MINUTE`
+- `TELEGRAM_NIGHT_SUMMARY_ENABLED`
+- `TELEGRAM_NIGHT_SUMMARY_HOUR`
+- `TELEGRAM_NIGHT_SUMMARY_MINUTE`
 
 Retention settings:
 
@@ -152,10 +165,13 @@ Useful API checks:
 - `GET /api/exchanges/status`
 - `GET /api/arbitrage-opportunities`
 - `GET /api/exchanges/funding-leaders`
+- `GET /api/exchanges/funding-settlements`
 - `GET /api/exchanges/funding-trends`
 - `GET /api/opportunities/{canonical_symbol}/history`
 - `GET /api/telegram/status`
 - `GET /api/telegram/preview`
+- `GET /api/telegram/daily-summary-preview`
+- `POST /api/telegram/send-daily-summary`
 
 `GET /api/system/metrics` returns:
 
@@ -203,6 +219,18 @@ Automatic alerts are stateful and quality-filtered:
 - duplicate suppression per symbol
 - entered / exited alert updates
 
+Scheduled summaries are supported too:
+
+- `Morning Summary`
+- `Evening Summary`
+- `Night Summary`
+
+Default schedule in `Asia/Kolkata`:
+
+- morning: `09:00`
+- evening: `18:00`
+- night: `22:00`
+
 ## Railway Backend Deployment
 
 ### Recommended production layout
@@ -245,6 +273,7 @@ Why:
 
 - the Telegram bot poller is in-process, so multiple replicas would poll the same bot more than once
 - SQLite on a Railway volume is appropriate for a single app instance, not horizontal scaling
+- if more than one poller is active, Telegram will usually return `409 Conflict` from `getUpdates`
 
 ### SQLite on Railway
 
@@ -274,6 +303,18 @@ DATABASE_PATH=/app/data/arbradar.db
 TELEGRAM_ENABLED=true
 TELEGRAM_BOT_TOKEN=...
 TELEGRAM_CHAT_IDS=["...","..."]
+TELEGRAM_DAILY_SUMMARY_ENABLED=true
+TELEGRAM_DAILY_SUMMARY_TIMEZONE=Asia/Kolkata
+TELEGRAM_DAILY_SUMMARY_TOP_N=5
+TELEGRAM_MORNING_SUMMARY_ENABLED=true
+TELEGRAM_MORNING_SUMMARY_HOUR=9
+TELEGRAM_MORNING_SUMMARY_MINUTE=0
+TELEGRAM_EVENING_SUMMARY_ENABLED=true
+TELEGRAM_EVENING_SUMMARY_HOUR=18
+TELEGRAM_EVENING_SUMMARY_MINUTE=0
+TELEGRAM_NIGHT_SUMMARY_ENABLED=true
+TELEGRAM_NIGHT_SUMMARY_HOUR=22
+TELEGRAM_NIGHT_SUMMARY_MINUTE=0
 ```
 
 Also set your CORS to your Vercel domain, for example:
@@ -281,6 +322,22 @@ Also set your CORS to your Vercel domain, for example:
 ```bash
 CORS_ORIGINS=["https://your-frontend.vercel.app"]
 ```
+
+Production verification checklist:
+
+1. Open `GET /api/telegram/status`
+2. Confirm `summary_schedules` includes `morning`, `evening`, and `night`
+3. Confirm `update_errors = 0`
+4. Keep Railway at `1 replica`
+
+Current production check on `2026-04-09`:
+
+- `GET /api/health` returned `200`
+- `GET /api/telegram/status` returned `200`
+- production `summary_schedules` already shows `morning`, `evening`, and `night`
+- production `update_errors = 0`
+
+That means the production bot poller currently looks healthy, and there is no active sign of duplicate Telegram polling on Railway.
 
 ## Vercel Frontend Deployment
 
@@ -315,7 +372,8 @@ For production, replace `127.0.0.1:8000` with your Railway domain.
 
 - `Binance`: public market data only, no API key needed for this monitor
 - `Delta Exchange India`: public market data only, no API key needed for this monitor
-- `CoinDCX` and `CoinSwitch`: intentionally excluded from the focused public monitor build
+- `CoinDCX`: public market data only, no API key needed for this monitor
+- `CoinSwitch`: still excluded from the public monitor build because the futures feed needs signed access
 
 ## References
 

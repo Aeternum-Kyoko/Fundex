@@ -41,6 +41,11 @@ interface AlertEvent {
   created_at: string;
 }
 
+interface ExchangeHealthBadge {
+  label: string;
+  tone: "healthy" | "warning" | "danger" | "neutral";
+}
+
 const defaultAlertPreferences: AlertPreferences = {
   minSpreadPercent: 0.08,
   minNetAprPercent: 10,
@@ -152,6 +157,42 @@ function downloadCsv(csv: string, filename: string) {
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
+}
+
+function getExchangeHealthBadges(status: {
+  configured: boolean;
+  healthy: boolean;
+  snapshot_count: number;
+  last_success_at: string | null;
+  last_error: string | null;
+}): ExchangeHealthBadge[] {
+  const badges: ExchangeHealthBadge[] = [];
+  const ageSeconds = status.last_success_at ? (Date.now() - new Date(status.last_success_at).getTime()) / 1000 : null;
+
+  if (!status.configured) {
+    badges.push({ label: "Needs setup", tone: "neutral" });
+    return badges;
+  }
+
+  if (status.snapshot_count === 0) {
+    badges.push({ label: "Missing data", tone: "danger" });
+  }
+
+  if (status.last_error) {
+    badges.push({ label: "Feed issue", tone: "danger" });
+  }
+
+  if (ageSeconds != null && ageSeconds > 180) {
+    badges.push({ label: "Stale", tone: "danger" });
+  } else if (ageSeconds != null && ageSeconds > 60) {
+    badges.push({ label: "Delayed", tone: "warning" });
+  }
+
+  if (!badges.length) {
+    badges.push({ label: status.healthy ? "Healthy" : "Live" , tone: status.healthy ? "healthy" : "warning" });
+  }
+
+  return badges.slice(0, 3);
 }
 
 export function App() {
@@ -439,24 +480,32 @@ export function App() {
 
   return (
     <main className="page">
-      <section className="hero">
+      <nav className="top-nav">
+        <a href="#dashboard" className="top-nav-link">Dashboard</a>
+        <a href="#settlements" className="top-nav-link">Settlements</a>
+        <a href="#table" className="top-nav-link">Table</a>
+        <a href="https://t.me/alertbklbot" target="_blank" rel="noreferrer" className="top-nav-link">
+          Bot
+        </a>
+      </nav>
+
+      <section className="hero control-center-hero" id="dashboard">
         <div>
           <p className="eyebrow">ArbRadar</p>
-          <h1>Dark Funding Monitor</h1>
+          <h1>Funding Control Center</h1>
           <p className="lede">
-            Phase 4 turns the dashboard into an operations desk with live feed controls, browser notifications, alert history,
-            and one-click CSV export across every active exchange in the monitor.
+            A live desk for funding spreads, settlement timing, and symbol-level comparison across Binance, Delta, and CoinDCX.
           </p>
         </div>
 
-        <div className="hero-card">
-          <span className="chip">Current phase</span>
-          <strong>Phase 4</strong>
-          <p>Monitor, notify, export, review, and now jump from funding boards straight into pinned rows and full overview.</p>
+        <div className="hero-card control-center-card">
+          <span className="chip">Desk state</span>
+          <strong>{isLoading ? "Refreshing live data" : "Live monitor ready"}</strong>
+          <p>Use the sticky desk bar to search, sort, refresh, export, and move quickly between the table and compare flow.</p>
         </div>
       </section>
 
-      <section className="summary-grid">
+      <section className="summary-grid control-center-grid">
         <article className="summary-card">
           <span className="subtle">Visible symbols</span>
           <strong>{visibleOpportunities.length.toLocaleString()}</strong>
@@ -474,6 +523,10 @@ export function App() {
         <article className="summary-card">
           <span className="subtle">Largest spread</span>
           <strong>{formatPct(summary.largestSpread * 100, 3)}</strong>
+        </article>
+        <article className="summary-card">
+          <span className="subtle">Last refresh</span>
+          <strong>{lastUpdatedAt ? formatTimestamp(lastUpdatedAt) : "Waiting"}</strong>
         </article>
       </section>
 
@@ -503,18 +556,22 @@ export function App() {
       {isLoading && !fundingLeaders.length ? (
         <FundingLeadersSkeleton />
       ) : (
-        <FundingLeadersPanel
-          exchanges={fundingLeaders}
-          pinnedSymbols={watchlist}
-          trendMap={fundingTrendMap}
-          trendLoading={fundingTrendLoading}
-          nowTimestamp={nowTimestamp}
-          onOpenSymbol={openOverviewBySymbol}
-          onTogglePin={toggleWatchlist}
-        />
+        <section id="leaders">
+          <FundingLeadersPanel
+            exchanges={fundingLeaders}
+            pinnedSymbols={watchlist}
+            trendMap={fundingTrendMap}
+            trendLoading={fundingTrendLoading}
+            nowTimestamp={nowTimestamp}
+            onOpenSymbol={openOverviewBySymbol}
+            onTogglePin={toggleWatchlist}
+          />
+        </section>
       )}
 
-      <FundingSettlementBoard items={fundingSettlements} nowTimestamp={nowTimestamp} onOpenSymbol={openOverviewBySymbol} />
+      <section id="settlements">
+        <FundingSettlementBoard items={fundingSettlements} nowTimestamp={nowTimestamp} onOpenSymbol={openOverviewBySymbol} />
+      </section>
 
       <section className="phase-three-grid">
         <section className="overview-card">
@@ -737,7 +794,7 @@ export function App() {
         </section>
       </section>
 
-      <section className="workspace">
+      <section className="workspace" id="table">
         <section className="panel">
           <div className="panel-header">
             <div>
@@ -752,7 +809,32 @@ export function App() {
             </div>
           </div>
 
-          <div className="table-toolbar">
+          <div className="exchange-health-strip">
+            {statuses.map((status) => (
+              <article key={status.exchange} className={`exchange-health-card ${status.exchange}`}>
+                <div className="exchange-health-top">
+                  <strong>{status.display_name}</strong>
+                  <span className="subtle">{status.snapshot_count} rows</span>
+                </div>
+                <div className="exchange-health-badges">
+                  {getExchangeHealthBadges(status).map((badge) => (
+                    <span key={`${status.exchange}-${badge.label}`} className={`exchange-health-badge ${badge.tone}`}>
+                      {badge.label}
+                    </span>
+                  ))}
+                </div>
+                <div className="subtle exchange-health-meta">
+                  {status.last_success_at
+                    ? `Updated ${new Date(status.last_success_at).toLocaleTimeString()}`
+                    : status.last_error
+                      ? status.last_error
+                      : "Waiting for first poll"}
+                </div>
+              </article>
+            ))}
+          </div>
+
+          <div className="table-toolbar sticky-toolbar">
             <label className="control search-control">
               <span className="subtle">Search</span>
               <input
@@ -794,6 +876,14 @@ export function App() {
               <strong>
                 {watchlistOpportunities.length} / {activeAlerts.length}
               </strong>
+            </div>
+            <div className="toolbar-actions">
+              <button type="button" className="action-button" onClick={() => void refresh()}>
+                Refresh
+              </button>
+              <button type="button" className="action-button secondary-button" onClick={exportVisibleRows}>
+                Export
+              </button>
             </div>
           </div>
 

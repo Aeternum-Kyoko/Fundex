@@ -1,25 +1,34 @@
 :root {
   color-scheme: dark;
-  --bg: #070b14;
-  --bg-deep: #04070d;
-  --surface: rgba(13, 19, 31, 0.82);
-  --surface-strong: rgba(18, 26, 40, 0.94);
-  --surface-soft: rgba(24, 33, 50, 0.74);
+  --bg: #060810;
+  --bg-deep: #03050b;
+  --surface: rgba(15, 20, 31, 0.82);
+  --surface-strong: rgba(16, 22, 34, 0.94);
+  --surface-soft: rgba(24, 33, 50, 0.7);
   --surface-elevated: rgba(21, 30, 46, 0.98);
   --border: rgba(148, 163, 184, 0.16);
   --border-strong: rgba(148, 163, 184, 0.24);
   --text: #f3f7ff;
   --muted: #96a7bf;
   --muted-strong: #c4d1e2;
-  --accent: #7ee0c3;
+  --accent: #87dbc6;
   --accent-soft: rgba(126, 224, 195, 0.14);
-  --accent-2: #8ab4ff;
-  --accent-2-soft: rgba(138, 180, 255, 0.14);
-  --accent-warm: #ffca7a;
-  --accent-warm-soft: rgba(255, 202, 122, 0.14);
+  --accent-2: #9dbdff;
+  --accent-2-soft: rgba(138, 180, 255, 0.16);
+  --accent-warm: #f6c57a;
+  --accent-warm-soft: rgba(255, 202, 122, 0.16);
   --danger: #ff7d7d;
   --danger-soft: rgba(255, 125, 125, 0.16);
   --shadow: 0 30px 80px rgba(0, 0, 0, 0.42);
+  --shadow-soft: 0 18px 48px rgba(0, 0, 0, 0.28);
+  --binance: #f4d36a;
+  --binance-soft: rgba(244, 211, 106, 0.16);
+  --delta: #7aa7ff;
+  --delta-soft: rgba(122, 167, 255, 0.16);
+  --coindcx: #8ce6ba;
+  --coindcx-soft: rgba(140, 230, 186, 0.16);
+  --coinswitch: #ffb492;
+  --coinswitch-soft: rgba(255, 180, 146, 0.16);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", sans-serif;
 }
 
@@ -61,7 +70,36 @@ button {
 .page {
   width: min(1760px, calc(100vw - 32px));
   margin: 0 auto;
-  padding: 28px 0 40px;
+  padding: 20px 0 40px;
+}
+
+.top-nav {
+  position: sticky;
+  top: 12px;
+  z-index: 30;
+  display: inline-flex;
+  gap: 10px;
+  padding: 8px;
+  margin-bottom: 18px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(9, 13, 21, 0.78);
+  backdrop-filter: blur(24px) saturate(1.16);
+  box-shadow: var(--shadow-soft);
+}
+
+.top-nav-link {
+  padding: 10px 14px;
+  border-radius: 999px;
+  color: var(--muted-strong);
+  text-decoration: none;
+  transition: background 0.18s ease, color 0.18s ease, transform 0.18s ease;
+}
+
+.top-nav-link:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+  transform: translateY(-1px);
 }
 
 .hero,
@@ -81,6 +119,10 @@ button {
 .hero {
   grid-template-columns: minmax(0, 1.6fr) minmax(300px, 0.8fr);
   align-items: stretch;
+}
+
+.control-center-hero {
+  margin-bottom: 12px;
 }
 
 .hero h1,
@@ -139,6 +181,7 @@ button {
   backdrop-filter: blur(24px) saturate(1.14);
   box-shadow: var(--shadow);
   border-radius: 26px;
+  transition: transform 0.22s ease, border-color 0.22s ease, background 0.22s ease, box-shadow 0.22s ease;
 }
 
 .hero-card,
@@ -160,6 +203,12 @@ button {
   flex-direction: column;
   justify-content: space-between;
   gap: 12px;
+}
+
+.control-center-card {
+  background:
+    linear-gradient(135deg, rgba(135, 219, 198, 0.08), transparent 42%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02));
 }
 
 .chip,
@@ -204,6 +253,26 @@ button {
   margin-bottom: 8px;
 }
 
+.exchange-binance {
+  --exchange-color: var(--binance);
+  --exchange-surface: var(--binance-soft);
+}
+
+.exchange-delta {
+  --exchange-color: var(--delta);
+  --exchange-surface: var(--delta-soft);
+}
+
+.exchange-coindcx {
+  --exchange-color: var(--coindcx);
+  --exchange-surface: var(--coindcx-soft);
+}
+
+.exchange-coinswitch {
+  --exchange-color: var(--coinswitch);
+  --exchange-surface: var(--coinswitch-soft);
+}
+
 .binance-pill {
   background: var(--accent-2-soft);
   color: var(--accent-2);
@@ -217,6 +286,10 @@ button {
 .summary-grid {
   margin-top: 22px;
   grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.control-center-grid {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .status-grid {
@@ -276,6 +349,35 @@ button {
   grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.85fr);
 }
 
+.compare-hero-card {
+  justify-content: flex-start;
+  gap: 18px;
+}
+
+.compare-hero-callout {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+}
+
+.compare-hero-callout strong {
+  font-size: clamp(2.6rem, 4vw, 4rem);
+  letter-spacing: -0.06em;
+}
+
+.best-pair-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.best-pair-leg {
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+}
+
 .compare-top-actions,
 .compare-card-actions {
   display: flex;
@@ -295,19 +397,67 @@ button {
   margin-top: 22px;
 }
 
+.settlement-timeline {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.settlement-column {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  min-height: 0;
+}
+
+.settlement-column-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 4px 2px;
+}
+
+.timeline-count {
+  min-width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--muted-strong);
+}
+
 .settlement-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 18px;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.settlement-grid-scroll {
+  max-height: 430px;
+  overflow-y: auto;
+  padding-right: 6px;
+  scrollbar-width: thin;
+}
+
+.settlement-grid-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.settlement-grid-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
 }
 
 .settlement-card {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 22px;
-  padding: 18px;
-  background: rgba(255, 255, 255, 0.03);
+  padding: 16px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.03));
   display: grid;
-  gap: 14px;
+  gap: 12px;
 }
 
 .settlement-card-top {
@@ -321,10 +471,70 @@ button {
   text-align: left;
 }
 
+.settlement-exchange-line {
+  display: inline-flex;
+  width: fit-content;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+}
+
 .settlement-metrics {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+}
+
+.settlement-row-card {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.settlement-row-main {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.settlement-row-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.settlement-row-title strong {
+  font-size: 1rem;
+}
+
+.settlement-row-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px 14px;
+}
+
+.settlement-metric {
+  min-width: 0;
+}
+
+.settlement-metric strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.95rem;
+  letter-spacing: -0.02em;
+}
+
+.settlement-row-actions {
+  display: grid;
+  justify-items: end;
+  gap: 12px;
+}
+
+.settlement-footer {
+  margin-top: 0;
+  flex-direction: column;
+  align-items: end;
+  gap: 6px;
 }
 
 .compare-card-grid {
@@ -347,6 +557,9 @@ button {
 
 .compare-exchange-card {
   padding: 22px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02)),
+    var(--surface-soft);
 }
 
 .compare-detail-grid {
@@ -408,7 +621,85 @@ button {
 }
 
 .workspace {
-  margin-top: 24px;
+  margin-top: 20px;
+}
+
+.exchange-health-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.exchange-health-card {
+  padding: 16px 18px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: var(--shadow-soft);
+}
+
+.exchange-health-card.binance {
+  border-color: rgba(244, 211, 106, 0.2);
+  background: linear-gradient(180deg, rgba(244, 211, 106, 0.1), rgba(255, 255, 255, 0.03));
+}
+
+.exchange-health-card.delta {
+  border-color: rgba(122, 167, 255, 0.2);
+  background: linear-gradient(180deg, rgba(122, 167, 255, 0.1), rgba(255, 255, 255, 0.03));
+}
+
+.exchange-health-card.coindcx {
+  border-color: rgba(140, 230, 186, 0.2);
+  background: linear-gradient(180deg, rgba(140, 230, 186, 0.1), rgba(255, 255, 255, 0.03));
+}
+
+.exchange-health-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.exchange-health-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.exchange-health-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.exchange-health-badge.healthy {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.exchange-health-badge.warning {
+  color: var(--accent-warm);
+  background: var(--accent-warm-soft);
+}
+
+.exchange-health-badge.danger {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.exchange-health-badge.neutral {
+  color: var(--muted-strong);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.exchange-health-meta {
+  margin-top: 12px;
 }
 
 .phase-three-grid {
@@ -430,6 +721,15 @@ button {
   min-height: 100%;
 }
 
+.funding-exchange-card.exchange-binance,
+.funding-exchange-card.exchange-delta,
+.funding-exchange-card.exchange-coindcx {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02)),
+    var(--surface-strong);
+  border-color: color-mix(in srgb, var(--exchange-color, var(--border)) 24%, var(--border));
+}
+
 .panel {
   padding: 24px;
   background: var(--surface-strong);
@@ -447,10 +747,28 @@ button {
 
 .table-toolbar {
   display: grid;
-  grid-template-columns: minmax(0, 1.5fr) repeat(2, minmax(180px, 0.5fr)) minmax(180px, 0.45fr);
+  grid-template-columns: minmax(0, 1.5fr) repeat(2, minmax(180px, 0.55fr)) minmax(180px, 0.45fr) auto;
   gap: 14px;
   align-items: end;
   margin-bottom: 18px;
+}
+
+.sticky-toolbar {
+  position: sticky;
+  top: 72px;
+  z-index: 20;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  background: rgba(8, 12, 20, 0.84);
+  backdrop-filter: blur(22px);
+  box-shadow: var(--shadow-soft);
+}
+
+.toolbar-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
 }
 
 .control {
@@ -733,7 +1051,7 @@ button {
 
 .opportunity-table th,
 .opportunity-table td {
-  padding: 18px 16px;
+  padding: 22px 18px;
   text-align: left;
   border-bottom: 1px solid rgba(148, 163, 184, 0.1);
   vertical-align: middle;
@@ -757,7 +1075,8 @@ button {
   position: sticky;
   left: 0;
   z-index: 2;
-  background: rgba(9, 14, 23, 0.98);
+  background: rgba(8, 12, 20, 0.985);
+  box-shadow: 18px 0 28px rgba(5, 9, 16, 0.38);
 }
 
 .opportunity-table thead .sticky-column {
@@ -805,11 +1124,62 @@ button {
   gap: 16px;
 }
 
+.coin-primary {
+  display: grid;
+  gap: 8px;
+}
+
+.coin-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
 .coin-actions {
   display: flex;
   flex-direction: column;
   gap: 8px;
   align-items: end;
+}
+
+.quality-badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.mobile-quality-row {
+  margin-top: 8px;
+}
+
+.quality-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.quality-positive {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.quality-warning {
+  color: var(--accent-warm);
+  background: var(--accent-warm-soft);
+}
+
+.quality-danger {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.quality-neutral {
+  color: var(--muted-strong);
 }
 
 .overview-button,
@@ -818,6 +1188,30 @@ button {
   background: rgba(255, 255, 255, 0.06);
   color: var(--muted-strong);
   border-color: var(--border);
+}
+
+.table-pill.exchange-binance,
+.best-pair-leg.exchange-binance,
+.settlement-exchange-line.exchange-binance {
+  color: var(--binance);
+  background: var(--binance-soft);
+  border-color: rgba(244, 211, 106, 0.24);
+}
+
+.table-pill.exchange-delta,
+.best-pair-leg.exchange-delta,
+.settlement-exchange-line.exchange-delta {
+  color: var(--delta);
+  background: var(--delta-soft);
+  border-color: rgba(122, 167, 255, 0.24);
+}
+
+.table-pill.exchange-coindcx,
+.best-pair-leg.exchange-coindcx,
+.settlement-exchange-line.exchange-coindcx {
+  color: var(--coindcx);
+  background: var(--coindcx-soft);
+  border-color: rgba(140, 230, 186, 0.24);
 }
 
 .overview-button:hover,
@@ -878,6 +1272,7 @@ button {
   padding: 22px;
   background: rgba(2, 6, 12, 0.72);
   backdrop-filter: blur(20px);
+  animation: fade-in 0.18s ease;
 }
 
 .inspector-modal {
@@ -890,6 +1285,7 @@ button {
   background:
     linear-gradient(180deg, rgba(19, 28, 44, 0.98) 0%, rgba(11, 17, 28, 0.98) 100%);
   box-shadow: 0 40px 120px rgba(0, 0, 0, 0.56);
+  animation: rise-in 0.22s ease;
 }
 
 .inspector-actions {
@@ -972,6 +1368,7 @@ button {
   margin-top: 14px;
   padding: 18px;
   background: rgba(255, 255, 255, 0.04);
+  animation: fade-in 0.24s ease;
 }
 
 .skeleton-card,
@@ -1085,6 +1482,26 @@ button {
   }
 }
 
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 .history-chart {
   width: 100%;
   height: 220px;
@@ -1100,6 +1517,8 @@ button {
   .funding-leaders-grid,
   .funding-lists-grid,
   .settlement-grid,
+  .settlement-timeline,
+  .exchange-health-strip,
   .compare-manual-grid,
   .compare-card-grid,
   .comparison-metric-chart-grid {
@@ -1116,6 +1535,23 @@ button {
     max-width: none;
     text-align: left;
   }
+
+  .settlement-row-card {
+    grid-template-columns: 1fr;
+  }
+
+  .settlement-row-actions {
+    justify-items: start;
+  }
+
+  .settlement-footer {
+    flex-direction: row;
+    align-items: center;
+  }
+
+  .settlement-grid-scroll {
+    max-height: 380px;
+  }
 }
 
 @media (max-width: 980px) {
@@ -1128,7 +1564,8 @@ button {
   .alert-controls,
   .phase-three-grid,
   .funding-leaders-grid,
-  .funding-lists-grid {
+  .funding-lists-grid,
+  .settlement-timeline {
     grid-template-columns: 1fr;
   }
 
@@ -1138,6 +1575,10 @@ button {
 
   .hero h1 {
     font-size: 2.45rem;
+  }
+
+  .sticky-toolbar {
+    top: 18px;
   }
 }
 
@@ -1150,6 +1591,8 @@ button {
   .funding-leaders-grid,
   .funding-lists-grid,
   .settlement-grid,
+  .settlement-timeline,
+  .exchange-health-strip,
   .compare-manual-grid,
   .compare-card-grid,
   .compare-detail-grid,
@@ -1159,6 +1602,16 @@ button {
 
   .settlement-metrics {
     grid-template-columns: 1fr;
+  }
+
+  .settlement-row-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .settlement-grid-scroll {
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
   }
 
   .page {
@@ -1183,6 +1636,12 @@ button {
 
   .mobile-card-grid {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .top-nav {
+    width: 100%;
+    justify-content: space-between;
+    overflow: auto;
   }
 }
 

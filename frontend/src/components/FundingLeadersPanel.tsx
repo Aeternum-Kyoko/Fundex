@@ -1,5 +1,5 @@
 import { FundingSparkline } from "./FundingSparkline";
-import { formatCountdown, formatPct, formatUsd } from "../lib/monitor";
+import { exchangeToneClass, formatCountdown, formatPct, formatUsd } from "../lib/monitor";
 import type { ExchangeFundingLeaders, FundingLeader, FundingTrendPoint } from "../lib/types";
 
 interface FundingLeadersPanelProps {
@@ -112,7 +112,7 @@ export function FundingLeadersPanel({
   return (
     <section className="funding-leaders-grid">
       {exchanges.map((exchange) => (
-        <article className="overview-card funding-exchange-card" key={exchange.exchange}>
+        <article className={`overview-card funding-exchange-card ${exchangeToneClass(exchange.exchange)}`} key={exchange.exchange}>
           <div className="overview-card-header">
             <div>
               <p className="eyebrow">Funding Leaders</p>
