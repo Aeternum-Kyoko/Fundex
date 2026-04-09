@@ -54,6 +54,17 @@ class TelegramCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("CoinDCX", reply)
         self.assertIn("BTC-USDT-PERP", reply)
 
+    async def test_coinswitch_command_returns_a_coinswitch_section(self) -> None:
+        snapshots = [
+            make_snapshot(exchange="coinswitch", canonical_symbol="BTC-USDT-PERP", funding_rate=0.0025, exchange_symbol="BTCUSDT"),
+            make_snapshot(exchange="coinswitch", canonical_symbol="ETH-USDT-PERP", funding_rate=-0.0011, exchange_symbol="ETHUSDT"),
+        ]
+
+        reply = await self.service.build_reply("chat-1", "/coinswitch", snapshots, self.opportunities)
+
+        self.assertIn("CoinSwitch", reply)
+        self.assertIn("BTC-USDT-PERP", reply)
+
     async def test_compare_command_shows_all_exchange_sections(self) -> None:
         snapshots = [
             make_snapshot(exchange="binance", canonical_symbol="BTC-USDT-PERP", funding_rate=0.001, exchange_symbol="BTCUSDT"),
@@ -94,6 +105,7 @@ class TelegramCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("/compare BTC", reply)
         self.assertIn("/status", reply)
         self.assertIn("/exchanges", reply)
+        self.assertIn("/coinswitch", reply)
 
     async def test_alerts_on_reports_state_and_current_live_alerts(self) -> None:
         opportunities = [

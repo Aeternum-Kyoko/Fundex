@@ -11,3 +11,9 @@ class LinkBuilderTests(unittest.TestCase):
             exchange_trade_url("delta", "BLURUSD"),
             "https://www.delta.exchange/app/futures/trade/BLUR/BLURUSD",
         )
+
+    def test_coinswitch_trade_url_uses_symbol_deep_link(self) -> None:
+        self.assertEqual(
+            exchange_trade_url("coinswitch", "BTCUSDT"),
+            "https://coinswitch.co/pro/futures-perpetual/BTCUSDT",
+        )

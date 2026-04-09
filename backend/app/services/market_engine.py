@@ -10,6 +10,7 @@ from httpx import AsyncClient
 from app.adapters.base import ExchangeAdapter
 from app.adapters.binance import BinanceAdapter
 from app.adapters.coindcx import CoinDCXAdapter
+from app.adapters.coinswitch import CoinSwitchAdapter
 from app.adapters.delta import DeltaAdapter
 from app.core.config import Settings
 from app.models.market import ExchangeStatus
@@ -43,6 +44,8 @@ class MarketEngine:
             self.adapters.append(DeltaAdapter(self.client, settings))
         if settings.coindcx_enabled:
             self.adapters.append(CoinDCXAdapter(self.client, settings))
+        if settings.coinswitch_enabled and settings.coinswitch_configured:
+            self.adapters.append(CoinSwitchAdapter(self.client, settings))
 
     async def start(self) -> None:
         await self._seed_statuses()
@@ -169,6 +172,12 @@ class MarketEngine:
                 self.settings.coindcx_enabled,
                 True,
                 None,
+            ),
+            (
+                "coinswitch",
+                self.settings.coinswitch_enabled,
+                self.settings.coinswitch_configured,
+                "CoinSwitch API key and secret are required." if self.settings.coinswitch_enabled and not self.settings.coinswitch_configured else None,
             ),
         ]
 

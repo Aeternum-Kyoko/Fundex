@@ -93,6 +93,9 @@ class TelegramCommandService:
         if upper == "/COINDCX":
             return self._format_single_exchange_funding(snapshots, "coindcx")
 
+        if upper == "/COINSWITCH":
+            return self._format_single_exchange_funding(snapshots, "coinswitch")
+
         if upper.startswith("/WATCH "):
             symbol_query = normalized.split(maxsplit=1)[1].strip()
             match, error = self.find_opportunity(symbol_query, opportunities)
@@ -164,6 +167,7 @@ class TelegramCommandService:
             "/binance - Binance positive and negative leaders\n"
             "/delta - Delta positive and negative leaders\n"
             "/coindcx - CoinDCX positive and negative leaders\n"
+            "/coinswitch - CoinSwitch positive and negative leaders\n"
             "/exchanges - list active exchanges in the bot\n"
             "/status - show your alert and watchlist status\n"
             "/commands - show this help again\n"

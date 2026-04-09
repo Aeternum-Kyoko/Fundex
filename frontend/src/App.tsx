@@ -420,7 +420,7 @@ export function App() {
           <p className="eyebrow">ArbRadar</p>
           <h1>Funding Control Center</h1>
           <p className="lede">
-            A live desk for funding spreads, settlement timing, and symbol-level comparison across Binance, Delta, and CoinDCX.
+            A live desk for funding spreads, settlement timing, and symbol-level comparison across Binance, Delta, CoinDCX, and CoinSwitch.
           </p>
         </div>
 
@@ -703,7 +703,7 @@ export function App() {
               <input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search BTC, ETH, Binance, Delta, CoinDCX..."
+                placeholder="Search BTC, ETH, Binance, Delta, CoinDCX, CoinSwitch..."
               />
             </label>
 

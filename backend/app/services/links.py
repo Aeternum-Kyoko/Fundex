@@ -29,5 +29,5 @@ def exchange_trade_url(exchange: ExchangeName, exchange_symbol: str) -> str:
     if exchange == "coindcx":
         return "https://coindcx.com/crypto-futures/"
     if exchange == "coinswitch":
-        return "https://coinswitch.co/pro"
+        return f"https://coinswitch.co/pro/futures-perpetual/{symbol}"
     return "#"
