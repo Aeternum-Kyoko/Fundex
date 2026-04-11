@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useExecutionPlan } from "../hooks/useExecutionPlan";
 import { useSymbolComparison } from "../hooks/useSymbolComparison";
+import { useNow } from "../hooks/useNow";
 import { exchangeLabel, exchangeToneClass, explainNoPair, formatCountdown, formatFundingRate, formatPct, formatTimestamp, formatUsd } from "../lib/monitor";
 
 function buildExchangeDiagnostics(exchange: {
@@ -53,7 +54,7 @@ export function SymbolComparisonPage({ canonicalSymbol }: { canonicalSymbol: str
     Boolean(bestOpportunity),
     selectedExchanges,
   );
-  const nowTimestamp = Date.now();
+  const nowTimestamp = useNow(1000);
   const noPairReason = useMemo(
     () => (comparison && !bestOpportunity ? explainNoPair(comparison.exchanges) : null),
     [bestOpportunity, comparison],

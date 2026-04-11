@@ -5,6 +5,7 @@ import { FundingLeadersSkeleton, OpportunityTableSkeleton } from "./components/L
 import { OpportunityInspector } from "./components/OpportunityInspector";
 import { OpportunityTable } from "./components/OpportunityTable";
 import { useMarketFeed } from "./hooks/useMarketFeed";
+import { useNow } from "./hooks/useNow";
 import {
   buildOpportunityCsv,
   exchangeLabel,
@@ -199,7 +200,6 @@ export function App() {
   const [sortBy, setSortBy] = useState("spread-desc");
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [isOverviewOpen, setIsOverviewOpen] = useState(false);
-  const [nowTimestamp, setNowTimestamp] = useState(Date.now());
   const [refreshIntervalMs, setRefreshIntervalMs] = useState(() => readStoredNumber(REFRESH_KEY, 5000));
   const [alertPreferences, setAlertPreferences] = useState<AlertPreferences>(() =>
     readStoredObject(ALERTS_KEY, defaultAlertPreferences),
@@ -215,6 +215,7 @@ export function App() {
     () => readStoredStringArray(EXCHANGE_SCOPE_KEY) as ExchangeName[],
   );
   const recentAlertsRef = useRef(recentAlerts);
+  const nowTimestamp = useNow(1000);
 
   const { data, statuses, fundingLeaders, fundingSettlements, error, isLoading, lastUpdatedAt, refresh } =
     useMarketFeed(refreshIntervalMs, selectedExchanges);
@@ -262,16 +263,6 @@ export function App() {
       return next;
     });
   }, [toggleableExchanges]);
-
-  useEffect(() => {
-    const intervalId = window.setInterval(() => {
-      setNowTimestamp(Date.now());
-    }, 30_000);
-
-    return () => {
-      window.clearInterval(intervalId);
-    };
-  }, []);
 
   const filteredOpportunities = useMemo(() => {
     const query = deferredSearch.trim().toUpperCase();

@@ -120,8 +120,9 @@ export function OpportunityTable({
                     </div>
                     <strong>{opportunity.long_leg.display_name}</strong>
                     <div className="subtle">
-                      {opportunity.long_leg.exchange_symbol} · {intervalBadge(opportunity.funding_interval_hours)}
+                      {opportunity.long_leg.exchange_symbol} - {intervalBadge(opportunity.funding_interval_hours)}
                     </div>
+                    <div className="subtle">Timer {formatCountdown(opportunity.long_leg.next_funding_time, nowTimestamp)}</div>
                   </td>
                   <td className={opportunity.long_leg.funding_rate >= 0 ? "positive" : "negative"}>
                     {formatPct(opportunity.long_leg.funding_rate * 100, 3)}
@@ -132,15 +133,22 @@ export function OpportunityTable({
                     </div>
                     <strong>{opportunity.short_leg.display_name}</strong>
                     <div className="subtle">
-                      {opportunity.short_leg.exchange_symbol} · {intervalBadge(opportunity.funding_interval_hours)}
+                      {opportunity.short_leg.exchange_symbol} - {intervalBadge(opportunity.funding_interval_hours)}
                     </div>
+                    <div className="subtle">Timer {formatCountdown(opportunity.short_leg.next_funding_time, nowTimestamp)}</div>
                   </td>
                   <td className={opportunity.short_leg.funding_rate >= 0 ? "positive" : "negative"}>
                     {formatPct(opportunity.short_leg.funding_rate * 100, 3)}
                   </td>
                   <td>
                     <strong>{formatCountdown(nextFunding, nowTimestamp)}</strong>
-                    <div className="subtle">{nextFunding ? "earliest funding" : "not available"}</div>
+                    <div className="subtle">{nextFunding ? "earliest pair funding" : "not available"}</div>
+                    <div className="subtle">
+                      {exchangeLabel(opportunity.long_leg.exchange)} {formatCountdown(opportunity.long_leg.next_funding_time, nowTimestamp)}
+                    </div>
+                    <div className="subtle">
+                      {exchangeLabel(opportunity.short_leg.exchange)} {formatCountdown(opportunity.short_leg.next_funding_time, nowTimestamp)}
+                    </div>
                   </td>
                   <td>{formatPct(opportunity.spread_rate * 100, 3)}</td>
                   <td className={opportunity.net_apr_percent >= 0 ? "positive" : "negative"}>
@@ -190,19 +198,21 @@ export function OpportunityTable({
                 <div className="mobile-card-grid">
                   <div>
                     <span className="subtle">
-                      {opportunity.long_leg.display_name} · {intervalBadge(opportunity.funding_interval_hours)}
+                      {opportunity.long_leg.display_name} - {intervalBadge(opportunity.funding_interval_hours)}
                     </span>
                     <strong className={opportunity.long_leg.funding_rate >= 0 ? "positive" : "negative"}>
                       {formatPct(opportunity.long_leg.funding_rate * 100, 3)}
                     </strong>
+                    <span className="subtle">Timer {formatCountdown(opportunity.long_leg.next_funding_time, nowTimestamp)}</span>
                   </div>
                   <div>
                     <span className="subtle">
-                      {opportunity.short_leg.display_name} · {intervalBadge(opportunity.funding_interval_hours)}
+                      {opportunity.short_leg.display_name} - {intervalBadge(opportunity.funding_interval_hours)}
                     </span>
                     <strong className={opportunity.short_leg.funding_rate >= 0 ? "positive" : "negative"}>
                       {formatPct(opportunity.short_leg.funding_rate * 100, 3)}
                     </strong>
+                    <span className="subtle">Timer {formatCountdown(opportunity.short_leg.next_funding_time, nowTimestamp)}</span>
                   </div>
                   <div>
                     <span className="subtle">Spread</span>
@@ -211,6 +221,7 @@ export function OpportunityTable({
                   <div>
                     <span className="subtle">Funding</span>
                     <strong>{formatCountdown(nextFunding, nowTimestamp)}</strong>
+                    <span className="subtle">Pair earliest</span>
                   </div>
                   <div>
                     <span className="subtle">Lower funding</span>

@@ -50,24 +50,22 @@ export function formatCountdown(timestamp: string | null, nowTimestamp = Date.no
     return "n/a";
   }
 
-  if (remainingMs <= 60_000) {
+  if (remainingMs <= 0) {
     return "due now";
   }
 
-  const totalMinutes = Math.floor(remainingMs / 60_000);
-  const days = Math.floor(totalMinutes / (60 * 24));
-  const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
-  const minutes = totalMinutes % 60;
+  const totalSeconds = Math.floor(remainingMs / 1000);
+  const days = Math.floor(totalSeconds / 86_400);
+  const hours = Math.floor((totalSeconds % 86_400) / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+  const padded = (value: number) => String(value).padStart(2, "0");
 
   if (days > 0) {
-    return `${days}d ${hours}h`;
+    return `${days}d ${padded(hours)}h ${padded(minutes)}m ${padded(seconds)}s`;
   }
 
-  if (hours > 0) {
-    return `${hours}h ${minutes}m`;
-  }
-
-  return `${minutes}m`;
+  return `${padded(hours)}:${padded(minutes)}:${padded(seconds)}`;
 }
 
 export function formatTimestamp(value: string | null) {
