@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     binance_enabled: bool = True
     delta_enabled: bool = True
     coindcx_enabled: bool = False
+    coindcx_api_key: str | None = None
+    coindcx_secret_key: str | None = None
     coinswitch_enabled: bool = False
     coinswitch_api_key: str | None = None
     coinswitch_secret_key: str | None = None
