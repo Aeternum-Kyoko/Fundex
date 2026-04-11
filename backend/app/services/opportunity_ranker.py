@@ -102,6 +102,7 @@ def build_opportunity_leg(snapshot: FundingSnapshot) -> OpportunityLeg:
         display_name=exchange_display_name(snapshot.exchange),
         exchange_symbol=snapshot.exchange_symbol,
         funding_rate=snapshot.funding_rate,
+        max_leverage=snapshot.max_leverage,
         mark_price=snapshot.mark_price,
         open_interest_usd=snapshot.open_interest_usd,
         volume_24h=snapshot.volume_24h,

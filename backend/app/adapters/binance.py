@@ -13,6 +13,16 @@ class BinanceAdapter(ExchangeAdapter):
     _maker_fee_bps = 2.0
     _taker_fee_bps = 5.0
 
+    @staticmethod
+    def _extract_max_leverage(item: dict) -> float | None:
+        raw_value = item.get("maxLeverage") or item.get("max_leverage")
+        if raw_value in (None, ""):
+            return None
+        try:
+            return float(raw_value)
+        except (TypeError, ValueError):
+            return None
+
     async def fetch_snapshots(self) -> list[FundingSnapshot]:
         response = await self.client.get("https://fapi.binance.com/fapi/v1/premiumIndex", timeout=30.0)
         response.raise_for_status()
@@ -39,6 +49,7 @@ class BinanceAdapter(ExchangeAdapter):
                     quote_asset=identity.quote_asset,
                     funding_rate=float(item["lastFundingRate"]),
                     funding_interval_hours=8,
+                    max_leverage=self._extract_max_leverage(item),
                     mark_price=float(item["markPrice"]),
                     index_price=float(item["indexPrice"]),
                     next_funding_time=next_funding_time,

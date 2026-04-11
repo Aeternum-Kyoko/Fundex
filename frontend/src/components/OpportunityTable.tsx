@@ -2,6 +2,7 @@ import {
   exchangeLabel,
   exchangeToneClass,
   formatCountdown,
+  formatLeverage,
   formatPct,
   formatUsd,
   getNextFundingTime,
@@ -123,6 +124,7 @@ export function OpportunityTable({
                       {opportunity.long_leg.exchange_symbol} - {intervalBadge(opportunity.funding_interval_hours)}
                     </div>
                     <div className="subtle">Timer {formatCountdown(opportunity.long_leg.next_funding_time, nowTimestamp)}</div>
+                    <div className="subtle">Max lev {formatLeverage(opportunity.long_leg.max_leverage)}</div>
                   </td>
                   <td className={opportunity.long_leg.funding_rate >= 0 ? "positive" : "negative"}>
                     {formatPct(opportunity.long_leg.funding_rate * 100, 3)}
@@ -136,6 +138,7 @@ export function OpportunityTable({
                       {opportunity.short_leg.exchange_symbol} - {intervalBadge(opportunity.funding_interval_hours)}
                     </div>
                     <div className="subtle">Timer {formatCountdown(opportunity.short_leg.next_funding_time, nowTimestamp)}</div>
+                    <div className="subtle">Max lev {formatLeverage(opportunity.short_leg.max_leverage)}</div>
                   </td>
                   <td className={opportunity.short_leg.funding_rate >= 0 ? "positive" : "negative"}>
                     {formatPct(opportunity.short_leg.funding_rate * 100, 3)}
@@ -204,6 +207,7 @@ export function OpportunityTable({
                       {formatPct(opportunity.long_leg.funding_rate * 100, 3)}
                     </strong>
                     <span className="subtle">Timer {formatCountdown(opportunity.long_leg.next_funding_time, nowTimestamp)}</span>
+                    <span className="subtle">Max lev {formatLeverage(opportunity.long_leg.max_leverage)}</span>
                   </div>
                   <div>
                     <span className="subtle">
@@ -213,6 +217,7 @@ export function OpportunityTable({
                       {formatPct(opportunity.short_leg.funding_rate * 100, 3)}
                     </strong>
                     <span className="subtle">Timer {formatCountdown(opportunity.short_leg.next_funding_time, nowTimestamp)}</span>
+                    <span className="subtle">Max lev {formatLeverage(opportunity.short_leg.max_leverage)}</span>
                   </div>
                   <div>
                     <span className="subtle">Spread</span>

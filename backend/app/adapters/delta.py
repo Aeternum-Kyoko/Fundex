@@ -29,6 +29,36 @@ class DeltaAdapter(ExchangeAdapter):
         self._metadata_lock = asyncio.Lock()
 
     @staticmethod
+    def _coerce_float(raw_value: object) -> float | None:
+        if raw_value in (None, ""):
+            return None
+        try:
+            return float(raw_value)
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _extract_max_leverage(cls, product: dict) -> float | None:
+        product_specs = product.get("product_specs") or {}
+        candidate_values = (
+            product.get("max_leverage"),
+            product.get("maxLeverage"),
+            product.get("maximum_leverage"),
+            product.get("max_retail_leverage"),
+            product.get("maxRetailLeverage"),
+            product_specs.get("max_leverage"),
+            product_specs.get("maxLeverage"),
+            product_specs.get("maximum_leverage"),
+            product_specs.get("max_retail_leverage"),
+            product_specs.get("maxRetailLeverage"),
+        )
+        for value in candidate_values:
+            parsed = cls._coerce_float(value)
+            if parsed is not None and parsed > 0:
+                return parsed
+        return None
+
+    @staticmethod
     def _parse_exchange_time(raw_time: str | None) -> datetime | None:
         if not raw_time:
             return None
@@ -68,8 +98,8 @@ class DeltaAdapter(ExchangeAdapter):
             timestamp_seconds = float(timestamp)
         return datetime.fromtimestamp(timestamp_seconds, tz=timezone.utc)
 
-    @staticmethod
-    def _build_product_metadata(product: dict) -> dict[str, float | int | str | None]:
+    @classmethod
+    def _build_product_metadata(cls, product: dict) -> dict[str, float | int | str | None]:
         product_specs = product.get("product_specs") or {}
         interval_seconds = product_specs.get("rate_exchange_interval")
         try:
@@ -92,6 +122,7 @@ class DeltaAdapter(ExchangeAdapter):
             "funding_interval_seconds": funding_interval_seconds,
             "maker_fee_bps": maker_fee_bps,
             "taker_fee_bps": taker_fee_bps,
+            "max_leverage": cls._extract_max_leverage(product),
             "funding_method": product.get("funding_method"),
             "annualized_funding": product.get("annualized_funding"),
         }
@@ -230,6 +261,7 @@ class DeltaAdapter(ExchangeAdapter):
                     quote_asset=identity.quote_asset,
                     funding_rate=funding_rate,
                     funding_interval_hours=funding_interval_hours,
+                    max_leverage=self._coerce_float(product_metadata.get("max_leverage")),
                     mark_price=float(item["mark_price"]),
                     index_price=float(item["spot_price"]),
                     open_interest=float(item["oi"]) if item.get("oi") is not None else None,

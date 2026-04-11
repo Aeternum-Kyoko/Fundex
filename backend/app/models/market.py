@@ -22,6 +22,7 @@ class FundingSnapshot(BaseModel):
     instrument_type: Literal["perpetual"] = "perpetual"
     funding_rate: float
     funding_interval_hours: int = 8
+    max_leverage: float | None = None
     mark_price: float | None = None
     index_price: float | None = None
     open_interest: float | None = None
@@ -50,6 +51,7 @@ class OpportunityLeg(BaseModel):
     display_name: str
     exchange_symbol: str
     funding_rate: float
+    max_leverage: float | None = None
     mark_price: float | None = None
     open_interest_usd: float | None = None
     volume_24h: float | None = None
@@ -95,6 +97,7 @@ class FundingLeader(BaseModel):
     exchange_symbol: str
     base_asset: str
     funding_rate: float
+    max_leverage: float | None = None
     next_funding_time: datetime | None = None
     mark_price: float | None = None
     open_interest_usd: float | None = None
@@ -120,6 +123,7 @@ class FundingSettlementItem(BaseModel):
     exchange_symbol: str
     funding_rate: float
     funding_interval_hours: int
+    max_leverage: float | None = None
     next_funding_time: datetime | None = None
     mark_price: float | None = None
     open_interest_usd: float | None = None
@@ -154,6 +158,7 @@ class SymbolComparisonExchangeSnapshot(BaseModel):
     funding_rate: float
     estimated_funding_rate: float | None = None
     funding_interval_hours: int
+    max_leverage: float | None = None
     mark_price: float | None = None
     open_interest_usd: float | None = None
     volume_24h: float | None = None

@@ -1,4 +1,4 @@
-import { exchangeToneClass, formatCountdown, formatPct, formatUsd, settlementBucket } from "../lib/monitor";
+import { exchangeToneClass, formatCountdown, formatLeverage, formatPct, formatUsd, settlementBucket } from "../lib/monitor";
 import type { FundingSettlementItem } from "../lib/types";
 
 interface FundingSettlementBoardProps {
@@ -85,6 +85,10 @@ export function FundingSettlementBoard({ items, nowTimestamp, onOpenSymbol }: Fu
                         <div className="settlement-metric">
                           <span className="subtle">Cycle</span>
                           <strong>{item.funding_interval_hours}h</strong>
+                        </div>
+                        <div className="settlement-metric">
+                          <span className="subtle">Max lev</span>
+                          <strong>{formatLeverage(item.max_leverage)}</strong>
                         </div>
                         <div className="settlement-metric">
                           <span className="subtle">Mark</span>

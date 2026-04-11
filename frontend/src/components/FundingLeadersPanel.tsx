@@ -1,4 +1,4 @@
-import { exchangeToneClass, formatCountdown, formatPct, formatUsd } from "../lib/monitor";
+import { exchangeToneClass, formatCountdown, formatLeverage, formatPct, formatUsd } from "../lib/monitor";
 import type { ExchangeFundingLeaders, FundingLeader } from "../lib/types";
 
 interface FundingLeadersPanelProps {
@@ -44,6 +44,7 @@ function FundingLeaderList({
 
                 <div className="funding-item-meta">
                   <span>{formatCountdown(leader.next_funding_time, nowTimestamp)}</span>
+                  <span>{formatLeverage(leader.max_leverage)}</span>
                   <span>{formatUsd(leader.open_interest_usd)}</span>
                 </div>
 

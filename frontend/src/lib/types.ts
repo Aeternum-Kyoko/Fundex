@@ -5,6 +5,7 @@ export interface OpportunityLeg {
   display_name: string;
   exchange_symbol: string;
   funding_rate: number;
+  max_leverage: number | null;
   mark_price: number | null;
   open_interest_usd: number | null;
   volume_24h: number | null;
@@ -61,6 +62,7 @@ export interface FundingLeader {
   exchange_symbol: string;
   base_asset: string;
   funding_rate: number;
+  max_leverage: number | null;
   next_funding_time: string | null;
   mark_price: number | null;
   open_interest_usd: number | null;
@@ -86,6 +88,7 @@ export interface FundingSettlementItem {
   exchange_symbol: string;
   funding_rate: number;
   funding_interval_hours: number;
+  max_leverage: number | null;
   next_funding_time: string | null;
   mark_price: number | null;
   open_interest_usd: number | null;
@@ -120,6 +123,7 @@ export interface SymbolComparisonExchangeSnapshot {
   funding_rate: number;
   estimated_funding_rate: number | null;
   funding_interval_hours: number;
+  max_leverage: number | null;
   mark_price: number | null;
   open_interest_usd: number | null;
   volume_24h: number | null;

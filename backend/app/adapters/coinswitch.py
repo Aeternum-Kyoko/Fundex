@@ -18,6 +18,20 @@ class CoinSwitchAdapter(ExchangeAdapter):
     _taker_fee_bps = 5.0
     _base_url = "https://coinswitch.co"
 
+    @classmethod
+    def _extract_max_leverage(cls, item: dict) -> float | None:
+        candidate_values = (
+            item.get("max_leverage"),
+            item.get("maxLeverage"),
+            item.get("leverage"),
+            item.get("allowed_leverage"),
+        )
+        for value in candidate_values:
+            parsed = cls._to_float(value)
+            if parsed is not None and parsed > 0:
+                return parsed
+        return None
+
     async def fetch_snapshots(self) -> list[FundingSnapshot]:
         epoch_time = await self._get_server_epoch()
         params = {"exchange": self.settings.coinswitch_exchange}
@@ -61,6 +75,7 @@ class CoinSwitchAdapter(ExchangeAdapter):
                     quote_asset=quote_asset,
                     funding_rate=funding_rate,
                     funding_interval_hours=8,
+                    max_leverage=self._extract_max_leverage(item),
                     mark_price=self._to_float(item.get("mark_price")),
                     index_price=self._to_float(item.get("index_price")),
                     open_interest=self._to_float(item.get("open_interest")),

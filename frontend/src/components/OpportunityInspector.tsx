@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { formatCountdown, formatPct, formatTimestamp, formatUsd, getNextFundingTime } from "../lib/monitor";
+import { formatCountdown, formatLeverage, formatPct, formatTimestamp, formatUsd, getNextFundingTime } from "../lib/monitor";
 import type { ArbitrageOpportunity, ExchangeName } from "../lib/types";
 
 interface OpportunityInspectorProps {
@@ -153,6 +153,12 @@ export function OpportunityInspector({
                 <div key={`${leg.exchange}-funding`}>
                   <span className="subtle">{leg.display_name} next funding</span>
                   <strong>{formatTimestamp(leg.next_funding_time)}</strong>
+                </div>
+              ))}
+              {legs.map((leg) => (
+                <div key={`${leg.exchange}-leverage`}>
+                  <span className="subtle">{leg.display_name} max leverage</span>
+                  <strong>{formatLeverage(leg.max_leverage)}</strong>
                 </div>
               ))}
             </div>

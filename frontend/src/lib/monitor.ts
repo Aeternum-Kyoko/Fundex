@@ -140,6 +140,13 @@ export function intervalBadge(intervalHours: number | null | undefined) {
   return `${intervalHours}h`;
 }
 
+export function formatLeverage(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value) || value <= 0) {
+    return "n/a";
+  }
+  return `${Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1)}x`;
+}
+
 export function qualityBadges(opportunity: ArbitrageOpportunity) {
   const badges: Array<{ label: string; tone: "positive" | "warning" | "danger" | "neutral" }> = [];
 

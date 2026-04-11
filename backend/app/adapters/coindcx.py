@@ -23,6 +23,25 @@ class CoinDCXAdapter(ExchangeAdapter):
         self._metadata_lock = asyncio.Lock()
 
     @staticmethod
+    def _extract_max_leverage(instrument: dict) -> float | None:
+        candidate_values = (
+            instrument.get("max_leverage"),
+            instrument.get("maxLeverage"),
+            instrument.get("maximum_leverage"),
+            instrument.get("leverage"),
+        )
+        for value in candidate_values:
+            if value in (None, ""):
+                continue
+            try:
+                parsed = float(value)
+            except (TypeError, ValueError):
+                continue
+            if parsed > 0:
+                return parsed
+        return None
+
+    @staticmethod
     def _next_funding_boundary(reference_time_ms: int | None, interval_hours: int = 8) -> datetime | None:
         if not reference_time_ms:
             return None
@@ -127,6 +146,7 @@ class CoinDCXAdapter(ExchangeAdapter):
                     quote_asset=quote_asset,
                     funding_rate=float(item["fr"]),
                     funding_interval_hours=funding_interval_hours,
+                    max_leverage=self._extract_max_leverage(instrument),
                     mark_price=float(item["mp"]) if item.get("mp") is not None else None,
                     volume_24h=float(item["v"]) if item.get("v") is not None else None,
                     next_funding_time=next_funding_time,

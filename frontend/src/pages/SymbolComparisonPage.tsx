@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { useExecutionPlan } from "../hooks/useExecutionPlan";
 import { useSymbolComparison } from "../hooks/useSymbolComparison";
 import { useNow } from "../hooks/useNow";
-import { exchangeLabel, exchangeToneClass, explainNoPair, formatCountdown, formatFundingRate, formatPct, formatTimestamp, formatUsd } from "../lib/monitor";
+import { exchangeLabel, exchangeToneClass, explainNoPair, formatCountdown, formatFundingRate, formatLeverage, formatPct, formatTimestamp, formatUsd } from "../lib/monitor";
 
 function buildExchangeDiagnostics(exchange: {
   data_age_seconds: number | null;
@@ -202,6 +202,10 @@ export function SymbolComparisonPage({ canonicalSymbol }: { canonicalSymbol: str
                       <strong>{exchange.funding_interval_hours}h</strong>
                     </div>
                     <div>
+                      <span className="subtle">Max leverage</span>
+                      <strong>{formatLeverage(exchange.max_leverage)}</strong>
+                    </div>
+                    <div>
                       <span className="subtle">Mark price</span>
                       <strong>{formatUsd(exchange.mark_price)}</strong>
                     </div>
@@ -324,6 +328,10 @@ export function SymbolComparisonPage({ canonicalSymbol }: { canonicalSymbol: str
                       <span className="subtle">Next funding</span>
                       <strong>{formatCountdown(bestOpportunity.long_leg.next_funding_time, nowTimestamp)}</strong>
                     </div>
+                    <div>
+                      <span className="subtle">Max leverage</span>
+                      <strong>{formatLeverage(bestOpportunity.long_leg.max_leverage)}</strong>
+                    </div>
                   </div>
                   <div className="compare-card-actions">
                     <a href={plan.long_leg.trade_url} target="_blank" rel="noreferrer" className="action-button secondary-button compare-link">
@@ -356,6 +364,10 @@ export function SymbolComparisonPage({ canonicalSymbol }: { canonicalSymbol: str
                     <div>
                       <span className="subtle">Next funding</span>
                       <strong>{formatCountdown(bestOpportunity.short_leg.next_funding_time, nowTimestamp)}</strong>
+                    </div>
+                    <div>
+                      <span className="subtle">Max leverage</span>
+                      <strong>{formatLeverage(bestOpportunity.short_leg.max_leverage)}</strong>
                     </div>
                   </div>
                   <div className="compare-card-actions">
