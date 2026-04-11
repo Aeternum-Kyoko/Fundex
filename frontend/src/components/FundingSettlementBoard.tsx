@@ -87,7 +87,7 @@ export function FundingSettlementBoard({ items, nowTimestamp, onOpenSymbol }: Fu
                           <strong>{item.funding_interval_hours}h</strong>
                         </div>
                         <div className="settlement-metric">
-                          <span className="subtle">Max lev</span>
+                          <span className="subtle">Max leverage</span>
                           <strong>{formatLeverage(item.max_leverage)}</strong>
                         </div>
                         <div className="settlement-metric">

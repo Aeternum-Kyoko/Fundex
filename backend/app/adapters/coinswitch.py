@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 
 from cryptography.hazmat.primitives.asymmetric import ed25519
@@ -17,6 +17,12 @@ class CoinSwitchAdapter(ExchangeAdapter):
     _maker_fee_bps = 2.0
     _taker_fee_bps = 5.0
     _base_url = "https://coinswitch.co"
+    _metadata_ttl = timedelta(hours=6)
+
+    def __init__(self, client, settings=None) -> None:
+        super().__init__(client, settings)
+        self._instrument_metadata: dict[str, dict[str, float | str | None]] = {}
+        self._instrument_metadata_updated_at: datetime | None = None
 
     @classmethod
     def _extract_max_leverage(cls, item: dict) -> float | None:
@@ -32,8 +38,51 @@ class CoinSwitchAdapter(ExchangeAdapter):
                 return parsed
         return None
 
+    async def _refresh_instrument_metadata_if_needed(self, epoch_time: int) -> None:
+        now = datetime.now(timezone.utc)
+        if self._instrument_metadata_updated_at and now - self._instrument_metadata_updated_at < self._metadata_ttl:
+            return
+
+        params = {"exchange": self.settings.coinswitch_exchange}
+        endpoint = "/trade/api/v2/futures/instrument_info"
+        signature, request_path = self._sign_request("GET", endpoint, params, str(epoch_time))
+
+        response = await self.client.get(
+            f"{self._base_url}{request_path}",
+            headers={
+                "Content-Type": "application/json",
+                "X-AUTH-SIGNATURE": signature,
+                "X-AUTH-APIKEY": self.settings.coinswitch_api_key or "",
+                "X-AUTH-EPOCH": str(epoch_time),
+                "User-Agent": "ArbRadar/1.0",
+            },
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        payload = response.json()
+
+        metadata: dict[str, dict[str, float | str | None]] = {}
+        raw_data = payload.get("data", {})
+        if isinstance(raw_data, dict):
+            iterator = raw_data.items()
+        elif isinstance(raw_data, list):
+            iterator = ((item.get("symbol"), item) for item in raw_data if isinstance(item, dict))
+        else:
+            iterator = []
+
+        for symbol, item in iterator:
+            if not symbol or not isinstance(item, dict):
+                continue
+            metadata[str(symbol).upper()] = {
+                "max_leverage": self._extract_max_leverage(item),
+            }
+
+        self._instrument_metadata = metadata
+        self._instrument_metadata_updated_at = now
+
     async def fetch_snapshots(self) -> list[FundingSnapshot]:
         epoch_time = await self._get_server_epoch()
+        await self._refresh_instrument_metadata_if_needed(epoch_time)
         params = {"exchange": self.settings.coinswitch_exchange}
         endpoint = "/trade/api/v2/futures/all-pairs/ticker"
         signature, request_path = self._sign_request("GET", endpoint, params, str(epoch_time))
@@ -58,6 +107,7 @@ class CoinSwitchAdapter(ExchangeAdapter):
                 continue
 
             canonical_symbol, base_asset, quote_asset = canonicalize(symbol)
+            instrument_metadata = self._instrument_metadata.get(symbol.upper(), {})
             next_funding = None
             if item.get("next_funding_timestamp"):
                 next_funding = datetime.fromtimestamp(item["next_funding_timestamp"] / 1000, tz=timezone.utc)
@@ -75,7 +125,7 @@ class CoinSwitchAdapter(ExchangeAdapter):
                     quote_asset=quote_asset,
                     funding_rate=funding_rate,
                     funding_interval_hours=8,
-                    max_leverage=self._extract_max_leverage(item),
+                    max_leverage=self._extract_max_leverage(item) or self._to_float(instrument_metadata.get("max_leverage")),
                     mark_price=self._to_float(item.get("mark_price")),
                     index_price=self._to_float(item.get("index_price")),
                     open_interest=self._to_float(item.get("open_interest")),
