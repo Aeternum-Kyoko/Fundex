@@ -407,6 +407,7 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
   const [scenario, setScenario] = useState<"best" | "reverse">("best");
   const [capitalInput, setCapitalInput] = useState("1000");
   const [leverageInput, setLeverageInput] = useState("2");
+  const [exchangeLeverageInput, setExchangeLeverageInput] = useState<Record<string, string>>({});
   const [entrySecondsBefore, setEntrySecondsBefore] = useState("30");
   const [exitSecondsAfter, setExitSecondsAfter] = useState("15");
   const [rememberCredentials, setRememberCredentials] = useState(() => Object.keys(readStoredCredentials()).length > 0);
@@ -428,16 +429,28 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
   const leverage = Number(leverageInput) > 0 ? Number(leverageInput) : 2;
   const entryLeadSeconds = Math.max(0, Number(entrySecondsBefore) || 30);
   const exitLagSeconds = Math.max(0, Number(exitSecondsAfter) || 15);
+  const leverageOverrides = useMemo(() => {
+    const next: Record<string, number> = {};
+    Object.entries(exchangeLeverageInput).forEach(([exchange, value]) => {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed) && parsed >= 1 && Math.abs(parsed - leverage) > 0.0001) {
+        next[exchange] = parsed;
+      }
+    });
+    return next;
+  }, [exchangeLeverageInput, leverage]);
 
   const { plan: bestPlan, loading: bestPlanLoading, error: bestPlanError } = useExecutionPlan(bestOpportunity?.canonical_symbol ?? null, Boolean(bestOpportunity), selectedExchanges, {
     capitalUsd,
     leverage,
+    leverageByExchange: leverageOverrides,
     holdingPeriods: 1,
     reverse: false,
   });
   const { plan: reversePlan, loading: reversePlanLoading, error: reversePlanError } = useExecutionPlan(bestOpportunity?.canonical_symbol ?? null, Boolean(bestOpportunity), selectedExchanges, {
     capitalUsd,
     leverage,
+    leverageByExchange: leverageOverrides,
     holdingPeriods: 1,
     reverse: true,
   });
@@ -458,7 +471,19 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
   const longSupport = activeOpportunity ? buildSupportNote(activeOpportunity.long_leg.exchange) : null;
   const shortSupport = activeOpportunity ? buildSupportNote(activeOpportunity.short_leg.exchange) : null;
   const liveModeAvailable = Boolean(longSupport?.live && shortSupport?.live);
-  const requiredExchanges = useMemo(() => (activeOpportunity ? [activeOpportunity.long_leg.exchange, activeOpportunity.short_leg.exchange] : []), [activeOpportunity]);
+  const requiredExchanges = useMemo(
+    () => (activeOpportunity ? Array.from(new Set([activeOpportunity.long_leg.exchange, activeOpportunity.short_leg.exchange])) : []),
+    [activeOpportunity],
+  );
+  const leverageMaxByExchange = useMemo(() => {
+    const next: Record<string, number | null> = {};
+    if (!activeOpportunity) {
+      return next;
+    }
+    next[activeOpportunity.long_leg.exchange] = activeOpportunity.long_leg.max_leverage;
+    next[activeOpportunity.short_leg.exchange] = activeOpportunity.short_leg.max_leverage;
+    return next;
+  }, [activeOpportunity]);
   const mode = paperTradingEnabled ? "paper" : "live";
   const demoCredentials = useMemo(() => buildDemoCredentials(requiredExchanges), [requiredExchanges]);
   const displayedCredentials = paperTradingEnabled ? demoCredentials : credentials;
@@ -555,10 +580,22 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
       scenario,
       capital_usd: capitalUsd,
       leverage,
+      leverage_overrides: leverageOverrides as Partial<Record<ExchangeName, number>>,
       holding_periods: 1,
       basis_risk_buffer_percent: 0.35,
       schedule: { entry_seconds_before_funding: entryLeadSeconds, exit_seconds_after_funding: exitLagSeconds },
       credentials: mode === "live" ? liveCredentialPayload : [],
+    });
+  };
+
+  const setLeverageOverrideValue = (exchange: ExchangeName, value: string) => {
+    setExchangeLeverageInput((current) => {
+      if (!value.trim()) {
+        const next = { ...current };
+        delete next[exchange];
+        return next;
+      }
+      return { ...current, [exchange]: value };
     });
   };
 
@@ -663,6 +700,26 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
             <label className="control execution-capital-input"><span className="subtle">Enter before funding (s)</span><input type="number" min="0" step="1" value={entrySecondsBefore} onChange={(event) => setEntrySecondsBefore(event.target.value)} /></label>
             <label className="control execution-capital-input"><span className="subtle">Exit after funding (s)</span><input type="number" min="0" step="1" value={exitSecondsAfter} onChange={(event) => setExitSecondsAfter(event.target.value)} /></label>
           </div>
+          {requiredExchanges.length ? (
+            <div className="execution-capital-group">
+              {requiredExchanges.map((exchange) => (
+                <label key={`override-${exchange}`} className="control execution-capital-input">
+                  <span className="subtle">
+                    {exchangeLabel(exchange)} leverage
+                    {leverageMaxByExchange[exchange] ? ` (max ${leverageMaxByExchange[exchange]!.toFixed(2)}x)` : ""}
+                  </span>
+                  <input
+                    type="number"
+                    min="1"
+                    step="0.1"
+                    value={exchangeLeverageInput[exchange] ?? ""}
+                    placeholder={`${leverage.toFixed(2)}x default`}
+                    onChange={(event) => setLeverageOverrideValue(exchange, event.target.value)}
+                  />
+                </label>
+              ))}
+            </div>
+          ) : null}
           <div className="execution-scenario-toggle">
             <button type="button" className={`overview-button execution-chip ${scenario === "best" ? "execution-chip-active" : ""}`} onClick={() => setScenario("best")}>Best setup</button>
             <button type="button" className={`overview-button execution-chip ${scenario === "reverse" ? "execution-chip-active" : ""}`} onClick={() => setScenario("reverse")}>Reverse setup</button>

@@ -6,6 +6,7 @@ const API_BASE = import.meta.env.VITE_API_URL ?? "/api";
 interface ExecutionPlanOptions {
   capitalUsd?: number;
   leverage?: number;
+  leverageByExchange?: Record<string, number>;
   holdingPeriods?: number;
   reverse?: boolean;
 }
@@ -22,6 +23,7 @@ export function useExecutionPlan(
   const exchangeQuery = selectedExchanges.join(",");
   const capitalUsd = options.capitalUsd ?? 1000;
   const leverage = options.leverage ?? 2;
+  const leverageByExchange = options.leverageByExchange ?? {};
   const holdingPeriods = options.holdingPeriods ?? 1;
   const reverse = options.reverse ?? false;
 
@@ -41,8 +43,12 @@ export function useExecutionPlan(
       try {
         const exchangeSuffix = exchangeQuery ? `&exchanges=${encodeURIComponent(exchangeQuery)}` : "";
         const reverseSuffix = reverse ? "&reverse=true" : "";
+        const leverageOverrideEntries = Object.entries(leverageByExchange).filter(([, value]) => Number.isFinite(value) && value >= 1);
+        const leverageOverrideSuffix = leverageOverrideEntries.length
+          ? `&leverage_overrides=${encodeURIComponent(JSON.stringify(Object.fromEntries(leverageOverrideEntries)))}`
+          : "";
         const response = await fetch(
-          `${API_BASE}/opportunities/${encodeURIComponent(canonicalSymbol)}/execution-plan?capital_usd=${encodeURIComponent(capitalUsd)}&leverage=${encodeURIComponent(leverage)}&holding_periods=${encodeURIComponent(holdingPeriods)}&basis_risk_buffer_percent=0.35${reverseSuffix}${exchangeSuffix}`,
+          `${API_BASE}/opportunities/${encodeURIComponent(canonicalSymbol)}/execution-plan?capital_usd=${encodeURIComponent(capitalUsd)}&leverage=${encodeURIComponent(leverage)}&holding_periods=${encodeURIComponent(holdingPeriods)}&basis_risk_buffer_percent=0.35${reverseSuffix}${exchangeSuffix}${leverageOverrideSuffix}`,
         );
         if (!response.ok) {
           throw new Error("Failed to load execution helper.");
@@ -69,7 +75,7 @@ export function useExecutionPlan(
     return () => {
       cancelled = true;
     };
-  }, [canonicalSymbol, enabled, exchangeQuery, capitalUsd, leverage, holdingPeriods, reverse]);
+  }, [canonicalSymbol, enabled, exchangeQuery, capitalUsd, leverage, leverageByExchange, holdingPeriods, reverse]);
 
   return { plan, loading, error };
 }

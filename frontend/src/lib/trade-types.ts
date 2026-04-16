@@ -19,6 +19,7 @@ export interface TradeCreateRequest {
   scenario: "best" | "reverse";
   capital_usd: number;
   leverage: number;
+  leverage_overrides?: Partial<Record<ExchangeName, number>>;
   holding_periods: number;
   basis_risk_buffer_percent: number;
   schedule: TradeScheduleRequest;

@@ -168,6 +168,7 @@ class TradeManager:
             notional_usd=None,
             capital_usd=request.capital_usd,
             leverage=request.leverage,
+            leverage_overrides=request.leverage_overrides,
             holding_periods=request.holding_periods,
             basis_risk_buffer_percent=request.basis_risk_buffer_percent,
             scenario=request.scenario,
@@ -415,7 +416,7 @@ class TradeManager:
                 snapshot=record.long_snapshot,
                 credential=record.credentials[record.long_snapshot.exchange],
                 leg=record.plan.long_leg,
-                leverage=record.request.leverage,
+                leverage=record.plan.long_leg.leverage,
                 is_exit=False,
             )
             await self._apply_order_response(session_id, "long", long_response, status="filled")
@@ -424,7 +425,7 @@ class TradeManager:
                 snapshot=record.short_snapshot,
                 credential=record.credentials[record.short_snapshot.exchange],
                 leg=record.plan.short_leg,
-                leverage=record.request.leverage,
+                leverage=record.plan.short_leg.leverage,
                 is_exit=False,
             )
             await self._apply_order_response(session_id, "short", short_response, status="filled")
@@ -439,7 +440,7 @@ class TradeManager:
             snapshot=record.long_snapshot,
             credential=record.credentials[record.long_snapshot.exchange],
             leg=record.plan.long_leg,
-            leverage=record.request.leverage,
+            leverage=record.plan.long_leg.leverage,
             is_exit=True,
         )
         await self._apply_order_response(session_id, "long", long_response, status="closed", exit_order=True)
@@ -448,7 +449,7 @@ class TradeManager:
             snapshot=record.short_snapshot,
             credential=record.credentials[record.short_snapshot.exchange],
             leg=record.plan.short_leg,
-            leverage=record.request.leverage,
+            leverage=record.plan.short_leg.leverage,
             is_exit=True,
         )
         await self._apply_order_response(session_id, "short", short_response, status="closed", exit_order=True)
@@ -465,7 +466,7 @@ class TradeManager:
                 snapshot=target_snapshot,
                 credential=credential,
                 leg=record.plan.long_leg if leg_name == "long" else record.plan.short_leg,
-                leverage=record.request.leverage,
+                leverage=(record.plan.long_leg if leg_name == "long" else record.plan.short_leg).leverage,
                 is_exit=True,
             )
             await self._append_event(record.response.id, "recovery", f"Emergency close was submitted for the {leg_name} leg.", level="warning")

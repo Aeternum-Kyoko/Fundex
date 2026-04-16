@@ -298,6 +298,7 @@ async def execution_plan(
     notional_usd: float | None = 1000,
     capital_usd: float | None = None,
     leverage: float = 2,
+    leverage_overrides: str | None = None,
     holding_periods: int = 3,
     basis_risk_buffer_percent: float = 0.35,
     reverse: bool = False,
@@ -310,12 +311,26 @@ async def execution_plan(
         raise HTTPException(status_code=404, detail="Opportunity not found in the current filtered set.")
 
     execution_target = reverse_opportunity(opportunity) if reverse else opportunity
+    parsed_leverage_overrides: dict[str, float] | None = None
+    if leverage_overrides:
+        try:
+            raw_payload = json.loads(leverage_overrides)
+            if not isinstance(raw_payload, dict):
+                raise ValueError("leverage_overrides must be a JSON object.")
+            parsed_leverage_overrides = {}
+            for key, value in raw_payload.items():
+                if not isinstance(key, str) or not isinstance(value, (int, float)):
+                    raise ValueError("leverage_overrides must contain numeric leverage values keyed by exchange.")
+                parsed_leverage_overrides[key.lower()] = float(value)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return build_execution_plan(
         execution_target,
         notional_usd=notional_usd,
         capital_usd=capital_usd,
         leverage=leverage,
+        leverage_overrides=parsed_leverage_overrides,
         holding_periods=holding_periods,
         basis_risk_buffer_percent=basis_risk_buffer_percent,
         scenario="reverse" if reverse else "best",

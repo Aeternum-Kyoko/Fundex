@@ -27,7 +27,8 @@ def reverse_opportunity(opportunity: ArbitrageOpportunity) -> ArbitrageOpportuni
 def _resolve_notional_usd(
     opportunity: ArbitrageOpportunity,
     *,
-    leverage: float,
+    long_leverage: float,
+    short_leverage: float,
     notional_usd: float | None,
     capital_usd: float | None,
 ) -> tuple[float, float | None]:
@@ -36,7 +37,7 @@ def _resolve_notional_usd(
             raise HTTPException(status_code=400, detail="capital_usd must be positive.")
 
         fee_factor = ((opportunity.long_leg.taker_fee_bps + opportunity.short_leg.taker_fee_bps) * 2) / 10_000
-        capital_factor = (2 / leverage) + fee_factor
+        capital_factor = (1 / long_leverage) + (1 / short_leverage) + fee_factor
         if capital_factor <= 0:
             raise HTTPException(status_code=400, detail="Unable to derive notional from capital.")
         return capital_usd / capital_factor, capital_usd
@@ -58,7 +59,7 @@ def _build_leg_plan(
     leverage: float,
     taker_fee_bps: float,
     trade_url: str,
-) -> ExecutionLegPlan:
+    ) -> ExecutionLegPlan:
     if not reference_price or reference_price <= 0:
         raise HTTPException(status_code=400, detail=f"Missing usable mark price for {display_name}.")
 
@@ -81,12 +82,36 @@ def _build_leg_plan(
     )
 
 
+def _resolve_leg_leverage(
+    *,
+    exchange: str,
+    display_name: str,
+    default_leverage: float,
+    leverage_overrides: dict[str, float],
+    max_leverage: float | None,
+    warnings: list[str],
+) -> float:
+    override = leverage_overrides.get(exchange)
+    leverage = override if override is not None else default_leverage
+    if leverage < 1:
+        raise HTTPException(status_code=400, detail=f"Leverage for {display_name} must be at least 1.")
+
+    if max_leverage is not None and max_leverage >= 1 and leverage > max_leverage:
+        warnings.append(
+            f"{display_name} leverage {leverage:.2f}x exceeds the exchange max {max_leverage:.2f}x, so the plan uses {max_leverage:.2f}x."
+        )
+        return max_leverage
+
+    return leverage
+
+
 def build_execution_plan(
     opportunity: ArbitrageOpportunity,
     *,
     notional_usd: float | None,
     capital_usd: float | None,
     leverage: float,
+    leverage_overrides: dict[str, float] | None,
     holding_periods: int,
     basis_risk_buffer_percent: float,
     scenario: str = "best",
@@ -96,9 +121,29 @@ def build_execution_plan(
     if holding_periods < 1:
         raise HTTPException(status_code=400, detail="holding_periods must be at least 1.")
 
+    warnings = list(opportunity.warnings)
+    normalized_overrides = {key.lower(): value for key, value in (leverage_overrides or {}).items() if isinstance(value, (int, float))}
+    long_leverage = _resolve_leg_leverage(
+        exchange=opportunity.long_leg.exchange,
+        display_name=opportunity.long_leg.display_name,
+        default_leverage=leverage,
+        leverage_overrides=normalized_overrides,
+        max_leverage=opportunity.long_leg.max_leverage,
+        warnings=warnings,
+    )
+    short_leverage = _resolve_leg_leverage(
+        exchange=opportunity.short_leg.exchange,
+        display_name=opportunity.short_leg.display_name,
+        default_leverage=leverage,
+        leverage_overrides=normalized_overrides,
+        max_leverage=opportunity.short_leg.max_leverage,
+        warnings=warnings,
+    )
+
     notional_usd, capital_input_usd = _resolve_notional_usd(
         opportunity,
-        leverage=leverage,
+        long_leverage=long_leverage,
+        short_leverage=short_leverage,
         notional_usd=notional_usd,
         capital_usd=capital_usd,
     )
@@ -110,7 +155,7 @@ def build_execution_plan(
         exchange_symbol=opportunity.long_leg.exchange_symbol,
         reference_price=opportunity.long_leg.mark_price,
         notional_usd=notional_usd,
-        leverage=leverage,
+        leverage=long_leverage,
         taker_fee_bps=opportunity.long_leg.taker_fee_bps,
         trade_url=opportunity.long_leg.trade_url,
     )
@@ -121,7 +166,7 @@ def build_execution_plan(
         exchange_symbol=opportunity.short_leg.exchange_symbol,
         reference_price=opportunity.short_leg.mark_price,
         notional_usd=notional_usd,
-        leverage=leverage,
+        leverage=short_leverage,
         taker_fee_bps=opportunity.short_leg.taker_fee_bps,
         trade_url=opportunity.short_leg.trade_url,
     )
@@ -159,10 +204,9 @@ def build_execution_plan(
         f"Re-evaluate after {holding_periods} funding period(s) or sooner if the confidence score drops.",
     ]
 
-    warnings = list(opportunity.warnings)
     if expected_net_pnl_usd <= 0:
         warnings.append("This dry-run plan is not net profitable after fees, slippage, and basis reserve.")
-    if leverage > 5:
+    if long_leverage > 5 or short_leverage > 5:
         warnings.append("Leverage above 5x increases liquidation and execution risk materially.")
 
     return ExecutionPlanResponse(

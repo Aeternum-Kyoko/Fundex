@@ -33,6 +33,7 @@ class TradeCreateRequest(BaseModel):
     scenario: TradeScenario = "best"
     capital_usd: float = 1000
     leverage: float = 2
+    leverage_overrides: dict[ExchangeName, float] = Field(default_factory=dict)
     holding_periods: int = 1
     basis_risk_buffer_percent: float = 0.35
     schedule: TradeScheduleRequest = Field(default_factory=TradeScheduleRequest)
