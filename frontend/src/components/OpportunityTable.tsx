@@ -30,6 +30,10 @@ export function OpportunityTable({
     const query = selectedExchanges.length ? `?exchanges=${encodeURIComponent(selectedExchanges.join(","))}` : "";
     return `/compare/${encodeURIComponent(canonicalSymbol)}${query}`;
   };
+  const tradeHref = (canonicalSymbol: string) => {
+    const query = selectedExchanges.length ? `?exchanges=${encodeURIComponent(selectedExchanges.join(","))}` : "";
+    return `/trade/${encodeURIComponent(canonicalSymbol)}${query}`;
+  };
 
   if (!opportunities.length) {
     return (
@@ -111,6 +115,13 @@ export function OpportunityTable({
                           onClick={(event) => event.stopPropagation()}
                         >
                           Compare
+                        </a>
+                        <a
+                          className="overview-button compare-button-link"
+                          href={tradeHref(opportunity.canonical_symbol)}
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          Trade
                         </a>
                       </div>
                     </div>
@@ -245,6 +256,9 @@ export function OpportunityTable({
                 </button>
                 <a className="overview-button compare-button-link" href={compareHref(opportunity.canonical_symbol)}>
                   Compare
+                </a>
+                <a className="overview-button compare-button-link" href={tradeHref(opportunity.canonical_symbol)}>
+                  Trade
                 </a>
               </div>
             </article>

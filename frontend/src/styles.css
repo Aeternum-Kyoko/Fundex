@@ -729,6 +729,76 @@ button {
   gap: 18px;
 }
 
+.trade-plan-grid,
+.trade-credentials-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.trade-mode-toggle {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.trade-mode-toggle input {
+  width: 22px;
+  height: 22px;
+  accent-color: var(--accent);
+  flex-shrink: 0;
+}
+
+.trade-mode-toggle-label {
+  display: grid;
+  gap: 4px;
+}
+
+.trade-mode-toggle-label strong {
+  font-size: 0.95rem;
+  letter-spacing: -0.02em;
+}
+
+.trade-support-note {
+  margin-top: 12px;
+}
+
+.trade-realized-grid {
+  margin-top: 18px;
+}
+
+.trade-history-item {
+  display: grid;
+  gap: 14px;
+}
+
+.trade-history-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.trade-history-metrics strong {
+  display: block;
+  margin-top: 4px;
+}
+
+.paper-guide-modal {
+  width: min(960px, 100%);
+}
+
+.trade-guide-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 22px;
+}
+
 .compare-manual-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1740,6 +1810,10 @@ button {
   .settlement-timeline,
   .exchange-health-strip,
   .compare-manual-grid,
+  .trade-plan-grid,
+  .trade-credentials-grid,
+  .trade-guide-grid,
+  .trade-history-metrics,
   .decision-summary-grid,
   .execution-outcome-grid,
   .compare-card-grid,
@@ -1816,6 +1890,10 @@ button {
   .settlement-timeline,
   .exchange-health-strip,
   .compare-manual-grid,
+  .trade-plan-grid,
+  .trade-credentials-grid,
+  .trade-guide-grid,
+  .trade-history-metrics,
   .decision-summary-grid,
   .execution-outcome-grid,
   .compare-card-grid,

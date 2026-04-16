@@ -18,6 +18,7 @@ from app.models.market import (
     SymbolComparisonExchangeSnapshot,
     SymbolComparisonResponse,
 )
+from app.models.trade import TradeCreateRequest, TradeSessionResponse
 from app.services.arbitrage import build_opportunities
 from app.services.execution import build_execution_plan, reverse_opportunity
 from app.services.funding_leaders import build_funding_leaders
@@ -319,3 +320,18 @@ async def execution_plan(
         basis_risk_buffer_percent=basis_risk_buffer_percent,
         scenario="reverse" if reverse else "best",
     )
+
+
+@router.post("/trade/sessions", response_model=TradeSessionResponse)
+async def create_trade_session(request: Request, payload: TradeCreateRequest) -> TradeSessionResponse:
+    return await request.app.state.trade_manager.create_session(payload)
+
+
+@router.get("/trade/sessions/{session_id}", response_model=TradeSessionResponse)
+async def get_trade_session(request: Request, session_id: str) -> TradeSessionResponse:
+    return await request.app.state.trade_manager.get_session(session_id)
+
+
+@router.post("/trade/sessions/{session_id}/cancel", response_model=TradeSessionResponse)
+async def cancel_trade_session(request: Request, session_id: str) -> TradeSessionResponse:
+    return await request.app.state.trade_manager.cancel_session(session_id)

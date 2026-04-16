@@ -11,6 +11,7 @@ from app.core.config import get_settings
 from app.services.history_store import HistoryStore
 from app.services.market_engine import MarketEngine
 from app.services.market_store import MarketStore
+from app.services.trade_manager import TradeManager
 
 settings = get_settings()
 logging.basicConfig(
@@ -24,16 +25,19 @@ async def lifespan(app: FastAPI):
     store = MarketStore()
     history_store = HistoryStore(settings.database_file)
     engine = MarketEngine(settings, store, history_store)
+    trade_manager = TradeManager(settings, store)
     app.state.market_store = store
     app.state.history_store = history_store
     app.state.market_engine = engine
     app.state.telegram_notifier = engine.telegram_notifier
+    app.state.trade_manager = trade_manager
     app.state.settings = settings
     await engine.start()
     try:
         yield
     finally:
         await engine.stop()
+        await trade_manager.stop()
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)

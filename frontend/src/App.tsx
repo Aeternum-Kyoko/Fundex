@@ -479,6 +479,7 @@ export function App() {
         <a href="#dashboard" className="top-nav-link">Dashboard</a>
         <a href="#settlements" className="top-nav-link">Settlements</a>
         <a href="#table" className="top-nav-link">Table</a>
+        <a href="/trade" className="top-nav-link">Trade</a>
         <a href="https://t.me/alertbklbot" target="_blank" rel="noreferrer" className="top-nav-link">
           Bot
         </a>

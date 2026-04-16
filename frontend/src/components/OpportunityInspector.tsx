@@ -47,6 +47,9 @@ export function OpportunityInspector({
   const compareHref = `/compare/${encodeURIComponent(opportunity.canonical_symbol)}${
     selectedExchanges.length ? `?exchanges=${encodeURIComponent(selectedExchanges.join(","))}` : ""
   }`;
+  const tradeHref = `/trade/${encodeURIComponent(opportunity.canonical_symbol)}${
+    selectedExchanges.length ? `?exchanges=${encodeURIComponent(selectedExchanges.join(","))}` : ""
+  }`;
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -71,6 +74,9 @@ export function OpportunityInspector({
             </div>
             <a className="overview-button compare-button-link" href={compareHref}>
               Compare
+            </a>
+            <a className="overview-button compare-button-link" href={tradeHref}>
+              Trade
             </a>
             <button type="button" className="close-button" onClick={onClose} aria-label="Close overview">
               Close
