@@ -19,7 +19,7 @@ from app.models.market import (
     SymbolComparisonResponse,
 )
 from app.services.arbitrage import build_opportunities
-from app.services.execution import build_execution_plan
+from app.services.execution import build_execution_plan, reverse_opportunity
 from app.services.funding_leaders import build_funding_leaders
 from app.services.links import exchange_display_name, exchange_trade_url
 from app.services.opportunity_ranker import is_snapshot_usable
@@ -294,10 +294,12 @@ async def execution_plan(
     request: Request,
     canonical_symbol: str,
     exchanges: str | None = None,
-    notional_usd: float = 1000,
+    notional_usd: float | None = 1000,
+    capital_usd: float | None = None,
     leverage: float = 2,
     holding_periods: int = 3,
     basis_risk_buffer_percent: float = 0.35,
+    reverse: bool = False,
 ) -> ExecutionPlanResponse:
     selected_exchanges = _resolved_exchanges(request, exchanges)
     snapshots = await _snapshots_for_exchanges(request, selected_exchanges)
@@ -306,10 +308,14 @@ async def execution_plan(
     if opportunity is None:
         raise HTTPException(status_code=404, detail="Opportunity not found in the current filtered set.")
 
+    execution_target = reverse_opportunity(opportunity) if reverse else opportunity
+
     return build_execution_plan(
-        opportunity,
+        execution_target,
         notional_usd=notional_usd,
+        capital_usd=capital_usd,
         leverage=leverage,
         holding_periods=holding_periods,
         basis_risk_buffer_percent=basis_risk_buffer_percent,
+        scenario="reverse" if reverse else "best",
     )

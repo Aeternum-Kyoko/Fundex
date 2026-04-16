@@ -1,5 +1,10 @@
 import type { ArbitrageOpportunity, ExchangeName, FundingSettlementItem, SymbolComparisonExchangeSnapshot } from "./types";
 
+export interface TrustBadge {
+  label: string;
+  tone: "positive" | "warning" | "danger" | "neutral";
+}
+
 export function formatPct(value: number, digits = 2) {
   return `${value.toFixed(digits)}%`;
 }
@@ -204,4 +209,69 @@ export function explainNoPair(exchanges: SymbolComparisonExchangeSnapshot[]) {
     return "There is no positive cross-exchange funding edge right now.";
   }
   return "The symbol is live, but the current spread does not clear the quality filters for a best pair.";
+}
+
+export function getExchangeTrustBadge(exchange: SymbolComparisonExchangeSnapshot): TrustBadge {
+  const isStale = exchange.data_age_seconds != null && exchange.data_age_seconds > 45;
+  const isDelayed = exchange.data_age_seconds != null && exchange.data_age_seconds > 15;
+  const missingCore = !exchange.next_funding_time || exchange.mark_price == null;
+  const missingLiquidity = exchange.open_interest_usd == null;
+
+  if (isStale) {
+    return { label: "Stale feed", tone: "danger" };
+  }
+  if (missingCore) {
+    return { label: "Partial feed", tone: "warning" };
+  }
+  if (isDelayed || missingLiquidity) {
+    return { label: "Usable feed", tone: "warning" };
+  }
+  return { label: "Verified feed", tone: "positive" };
+}
+
+export function getExchangeTrustReasons(exchange: SymbolComparisonExchangeSnapshot): string[] {
+  const reasons: string[] = [];
+
+  if (exchange.data_age_seconds == null) {
+    reasons.push("Feed age unavailable");
+  } else if (exchange.data_age_seconds > 45) {
+    reasons.push(`Stale by ${Math.round(exchange.data_age_seconds)}s`);
+  } else if (exchange.data_age_seconds > 15) {
+    reasons.push(`Delayed by ${Math.round(exchange.data_age_seconds)}s`);
+  } else {
+    reasons.push("Fresh timing");
+  }
+
+  if (exchange.next_funding_time) {
+    reasons.push("Funding time confirmed");
+  } else {
+    reasons.push("Funding time missing");
+  }
+
+  if (exchange.mark_price != null) {
+    reasons.push("Mark price confirmed");
+  } else {
+    reasons.push("Mark price missing");
+  }
+
+  if (exchange.open_interest_usd != null) {
+    reasons.push("Liquidity visible");
+  } else {
+    reasons.push("Liquidity partial");
+  }
+
+  return reasons.slice(0, 4);
+}
+
+export function getOpportunityTrustBadge(opportunity: ArbitrageOpportunity): TrustBadge {
+  if ((opportunity.max_leg_age_seconds ?? 999) > 45) {
+    return { label: "Low trust", tone: "danger" };
+  }
+  if (opportunity.confidence_score >= 0.8 && (opportunity.combined_open_interest_usd ?? 0) >= 2_000_000) {
+    return { label: "High trust", tone: "positive" };
+  }
+  if ((opportunity.combined_open_interest_usd ?? 0) < 1_000_000 || opportunity.confidence_score < 0.65) {
+    return { label: "Needs review", tone: "warning" };
+  }
+  return { label: "Good trust", tone: "neutral" };
 }

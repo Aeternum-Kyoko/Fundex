@@ -6,6 +6,47 @@ from app.models.execution import ExecutionLegPlan, ExecutionPlanResponse
 from app.models.market import ArbitrageOpportunity
 
 
+def reverse_opportunity(opportunity: ArbitrageOpportunity) -> ArbitrageOpportunity:
+    warnings = list(opportunity.warnings)
+    reverse_warning = "Reverse setup inverts the funding edge and is shown for comparison only."
+    if reverse_warning not in warnings:
+        warnings.append(reverse_warning)
+
+    return opportunity.model_copy(
+        update={
+            "long_leg": opportunity.short_leg,
+            "short_leg": opportunity.long_leg,
+            "spread_rate": -opportunity.spread_rate,
+            "gross_apr_percent": -opportunity.gross_apr_percent,
+            "net_apr_percent": -opportunity.net_apr_percent,
+            "warnings": warnings,
+        }
+    )
+
+
+def _resolve_notional_usd(
+    opportunity: ArbitrageOpportunity,
+    *,
+    leverage: float,
+    notional_usd: float | None,
+    capital_usd: float | None,
+) -> tuple[float, float | None]:
+    if capital_usd is not None:
+        if capital_usd <= 0:
+            raise HTTPException(status_code=400, detail="capital_usd must be positive.")
+
+        fee_factor = ((opportunity.long_leg.taker_fee_bps + opportunity.short_leg.taker_fee_bps) * 2) / 10_000
+        capital_factor = (2 / leverage) + fee_factor
+        if capital_factor <= 0:
+            raise HTTPException(status_code=400, detail="Unable to derive notional from capital.")
+        return capital_usd / capital_factor, capital_usd
+
+    if notional_usd is None or notional_usd <= 0:
+        raise HTTPException(status_code=400, detail="notional_usd must be positive.")
+
+    return notional_usd, None
+
+
 def _build_leg_plan(
     *,
     side: str,
@@ -43,17 +84,24 @@ def _build_leg_plan(
 def build_execution_plan(
     opportunity: ArbitrageOpportunity,
     *,
-    notional_usd: float,
+    notional_usd: float | None,
+    capital_usd: float | None,
     leverage: float,
     holding_periods: int,
     basis_risk_buffer_percent: float,
+    scenario: str = "best",
 ) -> ExecutionPlanResponse:
-    if notional_usd <= 0:
-        raise HTTPException(status_code=400, detail="notional_usd must be positive.")
     if leverage < 1:
         raise HTTPException(status_code=400, detail="leverage must be at least 1.")
     if holding_periods < 1:
         raise HTTPException(status_code=400, detail="holding_periods must be at least 1.")
+
+    notional_usd, capital_input_usd = _resolve_notional_usd(
+        opportunity,
+        leverage=leverage,
+        notional_usd=notional_usd,
+        capital_usd=capital_usd,
+    )
 
     long_leg = _build_leg_plan(
         side="buy",
@@ -118,7 +166,9 @@ def build_execution_plan(
         warnings.append("Leverage above 5x increases liquidation and execution risk materially.")
 
     return ExecutionPlanResponse(
+        scenario=scenario,  # type: ignore[arg-type]
         canonical_symbol=opportunity.canonical_symbol,
+        capital_input_usd=capital_input_usd,
         notional_usd=notional_usd,
         leverage=leverage,
         holding_periods=holding_periods,

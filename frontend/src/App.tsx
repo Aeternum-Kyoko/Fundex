@@ -14,6 +14,7 @@ import {
   formatPct,
   formatTimestamp,
   getNextFundingTime,
+  getOpportunityTrustBadge,
 } from "./lib/monitor";
 import type { ArbitrageOpportunity, ExchangeName } from "./lib/types";
 
@@ -297,6 +298,14 @@ export function App() {
     return [...filtered].sort((left, right) => {
       switch (sortBy) {
         case "net-desc":
+          return right.net_apr_percent - left.net_apr_percent;
+        case "positive-apr-desc":
+          if (left.net_apr_percent > 0 && right.net_apr_percent <= 0) {
+            return -1;
+          }
+          if (right.net_apr_percent > 0 && left.net_apr_percent <= 0) {
+            return 1;
+          }
           return right.net_apr_percent - left.net_apr_percent;
         case "net-asc":
           return left.net_apr_percent - right.net_apr_percent;
@@ -645,6 +654,11 @@ export function App() {
                     <strong>{opportunity.canonical_symbol}</strong>
                     <span>{formatCountdown(getNextFundingTime(opportunity), nowTimestamp)}</span>
                   </div>
+                  <div className="quality-badge-row">
+                    <span className={`quality-badge quality-${getOpportunityTrustBadge(opportunity).tone}`}>
+                      {getOpportunityTrustBadge(opportunity).label}
+                    </span>
+                  </div>
                   <div className="subtle">{reasons.join(" and ")}</div>
                 </button>
               ))}
@@ -842,6 +856,7 @@ export function App() {
                 <option value="spread-desc">Largest spread</option>
                 <option value="spread-asc">Smallest spread</option>
                 <option value="net-desc">Highest net APR</option>
+                <option value="positive-apr-desc">Most positive APR</option>
                 <option value="net-asc">Most negative APR</option>
                 <option value="confidence-desc">Highest confidence</option>
                 <option value="oi-desc">Largest open interest</option>

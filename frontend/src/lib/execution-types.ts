@@ -16,7 +16,9 @@ export interface ExecutionLegPlan {
 
 export interface ExecutionPlanResponse {
   phase: "phase-2-dry-run";
+  scenario: "best" | "reverse";
   canonical_symbol: string;
+  capital_input_usd: number | null;
   notional_usd: number;
   leverage: number;
   holding_periods: number;

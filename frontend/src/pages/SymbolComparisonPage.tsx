@@ -1,8 +1,22 @@
-import { useMemo } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
+import { useCurrencyRates } from "../hooks/useCurrencyRates";
 import { useExecutionPlan } from "../hooks/useExecutionPlan";
 import { useSymbolComparison } from "../hooks/useSymbolComparison";
 import { useNow } from "../hooks/useNow";
-import { exchangeLabel, exchangeToneClass, explainNoPair, formatCountdown, formatFundingRate, formatLeverage, formatPct, formatTimestamp, formatUsd } from "../lib/monitor";
+import {
+  exchangeLabel,
+  exchangeToneClass,
+  explainNoPair,
+  formatCountdown,
+  formatFundingRate,
+  formatLeverage,
+  formatPct,
+  formatTimestamp,
+  formatUsd,
+  getExchangeTrustBadge,
+  getExchangeTrustReasons,
+  getOpportunityTrustBadge,
+} from "../lib/monitor";
 
 function buildExchangeDiagnostics(exchange: {
   data_age_seconds: number | null;
@@ -40,20 +54,57 @@ function buildExchangeDiagnostics(exchange: {
   return diagnostics;
 }
 
+function formatLocalizedCurrency(amountUsd: number, currency: string, rates: Record<string, number>) {
+  const rate = rates[currency] ?? 1;
+  const converted = amountUsd * rate;
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency,
+    notation: Math.abs(converted) >= 1_000_000 ? "compact" : "standard",
+    maximumFractionDigits: 2,
+  }).format(converted);
+}
+
 export function SymbolComparisonPage({ canonicalSymbol }: { canonicalSymbol: string }) {
+  const [capitalUsdInput, setCapitalUsdInput] = useState("1000");
+  const [displayCurrency, setDisplayCurrency] = useState("USD");
+  const [executionScenario, setExecutionScenario] = useState<"best" | "reverse">("best");
+  const capitalUsd = Number(capitalUsdInput) > 0 ? Number(capitalUsdInput) : 1000;
+  const deferredCapitalUsd = useDeferredValue(capitalUsd);
   const selectedExchanges = useMemo(() => {
     const params = new URLSearchParams(window.location.search);
     const exchanges = params.get("exchanges");
     return exchanges ? exchanges.split(",").map((item) => item.trim().toLowerCase()).filter(Boolean) : [];
   }, []);
+  const { rates, loading: ratesLoading, error: ratesError, date: ratesDate } = useCurrencyRates();
+  const currencyOptions = useMemo(() => Object.keys(rates).sort(), [rates]);
   const { comparison, loading, error } = useSymbolComparison(canonicalSymbol, selectedExchanges);
 
   const bestOpportunity = comparison?.best_opportunity ?? null;
-  const { plan, loading: planLoading } = useExecutionPlan(
+  const { plan: bestPlan, loading: bestPlanLoading } = useExecutionPlan(
     bestOpportunity?.canonical_symbol ?? null,
     Boolean(bestOpportunity),
     selectedExchanges,
+    {
+      capitalUsd: deferredCapitalUsd,
+      leverage: 2,
+      holdingPeriods: 1,
+      reverse: false,
+    },
   );
+  const { plan: reversePlan, loading: reversePlanLoading } = useExecutionPlan(
+    bestOpportunity?.canonical_symbol ?? null,
+    Boolean(bestOpportunity),
+    selectedExchanges,
+    {
+      capitalUsd: deferredCapitalUsd,
+      leverage: 2,
+      holdingPeriods: 1,
+      reverse: true,
+    },
+  );
+  const plan = executionScenario === "reverse" ? reversePlan : bestPlan;
+  const planLoading = executionScenario === "reverse" ? reversePlanLoading : bestPlanLoading;
   const nowTimestamp = useNow(1000);
   const noPairReason = useMemo(
     () => (comparison && !bestOpportunity ? explainNoPair(comparison.exchanges) : null),
@@ -82,6 +133,26 @@ export function SymbolComparisonPage({ canonicalSymbol }: { canonicalSymbol: str
     const listed = new Set(comparison.exchanges.map((exchange) => exchange.exchange));
     return comparison.requested_exchanges.filter((exchange) => !listed.has(exchange));
   }, [comparison]);
+  const longSnapshot = useMemo(
+    () => comparison?.exchanges.find((exchange) => exchange.exchange === bestOpportunity?.long_leg.exchange) ?? null,
+    [bestOpportunity?.long_leg.exchange, comparison?.exchanges],
+  );
+  const shortSnapshot = useMemo(
+    () => comparison?.exchanges.find((exchange) => exchange.exchange === bestOpportunity?.short_leg.exchange) ?? null,
+    [bestOpportunity?.short_leg.exchange, comparison?.exchanges],
+  );
+  const decisionTrust = useMemo(() => (bestOpportunity ? getOpportunityTrustBadge(bestOpportunity) : null), [bestOpportunity]);
+  const selectedRate = rates[displayCurrency] ?? 1;
+  const fxSummary = useMemo(() => {
+    if (displayCurrency === "USD") {
+      return "Universal base: USD";
+    }
+    return `1 USD = ${selectedRate.toFixed(4)} ${displayCurrency}`;
+  }, [displayCurrency, selectedRate]);
+  const formatMoney = (amountUsd: number) =>
+    displayCurrency === "USD"
+      ? formatUsd(amountUsd)
+      : `${formatUsd(amountUsd)} (${formatLocalizedCurrency(amountUsd, displayCurrency, rates)})`;
 
   return (
     <main className="page compare-page">
@@ -155,6 +226,100 @@ export function SymbolComparisonPage({ canonicalSymbol }: { canonicalSymbol: str
         </article>
       </section>
 
+      {bestOpportunity && plan ? (
+        <section className="panel compare-panel decision-summary-panel">
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">Decision Summary</p>
+              <h2>Best action right now</h2>
+              <div className="subtle">
+                A tighter read on what to do, how trustworthy the feed looks, and what leverage room the two venues expose.
+              </div>
+            </div>
+            {decisionTrust ? (
+              <span className={`quality-badge quality-${decisionTrust.tone} decision-trust-badge`}>{decisionTrust.label}</span>
+            ) : null}
+          </div>
+
+          <div className="decision-summary-grid">
+            <article className="overview-card decision-summary-card">
+              <div className="overview-card-header">
+                <strong>Action</strong>
+                <span className="subtle">{formatPct(plan.expected_net_return_on_capital_percent)} expected return</span>
+              </div>
+              <div className="decision-summary-stack">
+                <div>
+                  <span className="subtle">Long</span>
+                  <strong>{plan.long_leg.display_name}</strong>
+                  <div className="subtle">
+                    {plan.long_leg.exchange_symbol} | {executionScenario === "reverse"
+                      ? formatFundingRate(bestOpportunity.short_leg.funding_rate)
+                      : formatFundingRate(bestOpportunity.long_leg.funding_rate)}
+                  </div>
+                </div>
+                <div>
+                  <span className="subtle">Short</span>
+                  <strong>{plan.short_leg.display_name}</strong>
+                  <div className="subtle">
+                    {plan.short_leg.exchange_symbol} | {executionScenario === "reverse"
+                      ? formatFundingRate(bestOpportunity.long_leg.funding_rate)
+                      : formatFundingRate(bestOpportunity.short_leg.funding_rate)}
+                  </div>
+                </div>
+              </div>
+            </article>
+
+            <article className="overview-card decision-summary-card">
+              <div className="overview-card-header">
+                <strong>Timing and cost</strong>
+                <span className="subtle">Current live pair</span>
+              </div>
+              <div className="decision-summary-stack">
+                <div>
+                  <span className="subtle">Pair funding</span>
+                  <strong>{pairFundingTime ? formatCountdown(pairFundingTime, nowTimestamp) : "n/a"}</strong>
+                </div>
+                <div>
+                  <span className="subtle">Projected profit</span>
+                  <strong>{formatMoney(plan.expected_net_pnl_usd)}</strong>
+                </div>
+                <div>
+                  <span className="subtle">Fee impact</span>
+                  <strong>{formatMoney(plan.estimated_total_fees_usd)}</strong>
+                </div>
+              </div>
+            </article>
+
+            <article className="overview-card decision-summary-card">
+              <div className="overview-card-header">
+                <strong>Leverage and trust</strong>
+                <span className="subtle">Venue-specific checks</span>
+              </div>
+              <div className="decision-summary-stack">
+                <div>
+                  <span className="subtle">{plan.long_leg.display_name}</span>
+                  <strong>{formatLeverage(executionScenario === "reverse" ? bestOpportunity.short_leg.max_leverage : bestOpportunity.long_leg.max_leverage)}</strong>
+                  <div className="subtle">
+                    {executionScenario === "reverse"
+                      ? shortSnapshot ? getExchangeTrustBadge(shortSnapshot).label : "Trust unavailable"
+                      : longSnapshot ? getExchangeTrustBadge(longSnapshot).label : "Trust unavailable"}
+                  </div>
+                </div>
+                <div>
+                  <span className="subtle">{plan.short_leg.display_name}</span>
+                  <strong>{formatLeverage(executionScenario === "reverse" ? bestOpportunity.long_leg.max_leverage : bestOpportunity.short_leg.max_leverage)}</strong>
+                  <div className="subtle">
+                    {executionScenario === "reverse"
+                      ? longSnapshot ? getExchangeTrustBadge(longSnapshot).label : "Trust unavailable"
+                      : shortSnapshot ? getExchangeTrustBadge(shortSnapshot).label : "Trust unavailable"}
+                  </div>
+                </div>
+              </div>
+            </article>
+          </div>
+        </section>
+      ) : null}
+
       {loading && !comparison ? (
         <section className="panel">
           <div className="empty-state">
@@ -187,9 +352,14 @@ export function SymbolComparisonPage({ canonicalSymbol }: { canonicalSymbol: str
                       <p className="eyebrow">Exchange</p>
                       <strong>{exchange.display_name}</strong>
                     </div>
-                    <span className={exchange.funding_rate >= 0 ? "phase-pill" : "overview-badge negative-badge"}>
-                      {formatFundingRate(exchange.funding_rate)}
-                    </span>
+                    <div className="compare-card-top-badges">
+                      <span className={`quality-badge quality-${getExchangeTrustBadge(exchange).tone}`}>
+                        {getExchangeTrustBadge(exchange).label}
+                      </span>
+                      <span className={exchange.funding_rate >= 0 ? "phase-pill" : "overview-badge negative-badge"}>
+                        {formatFundingRate(exchange.funding_rate)}
+                      </span>
+                    </div>
                   </div>
 
                   <div className="detail-grid compare-detail-grid">
@@ -253,8 +423,15 @@ export function SymbolComparisonPage({ canonicalSymbol }: { canonicalSymbol: str
 
                   <div className="compare-diagnostics">
                     <div className="overview-card-header">
-                      <strong>Exchange health</strong>
-                      <span className="subtle">{buildExchangeDiagnostics(exchange).length ? "Needs review" : "Healthy enough"}</span>
+                      <strong>Feed trust</strong>
+                      <span className="subtle">{getExchangeTrustReasons(exchange).join(" | ")}</span>
+                    </div>
+                    <div className="quality-badge-row compare-trust-row">
+                      {getExchangeTrustReasons(exchange).map((reason) => (
+                        <span key={reason} className="quality-badge quality-neutral">
+                          {reason}
+                        </span>
+                      ))}
                     </div>
                     {buildExchangeDiagnostics(exchange).length ? (
                       <ul className="warning-list compare-warning-list">
@@ -294,14 +471,110 @@ export function SymbolComparisonPage({ canonicalSymbol }: { canonicalSymbol: str
           <section className="panel compare-panel">
             <div className="panel-header">
               <div>
-                <p className="eyebrow">Manual Helper</p>
-                <h2>What to do</h2>
-                <div className="subtle">Read-only execution guidance with symbols, fees, countdown, and direct exchange links.</div>
+                <p className="eyebrow">Execution Size Helper</p>
+                <h2>Capital, quantity, margin, and projected profit</h2>
+                <div className="subtle">Give your capital and compare the normal hedge against the reversed setup before acting.</div>
               </div>
               <div className="panel-note">{planLoading ? "Building helper" : plan ? "Dry-run ready" : "No live pair"}</div>
             </div>
 
-            {plan && bestOpportunity ? (
+            {bestOpportunity ? (
+              <>
+                <div className="execution-controls">
+                  <div className="execution-capital-group">
+                    {[500, 1000, 5000, 10000].map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        className={`overview-button execution-chip ${capitalUsd === preset ? "execution-chip-active" : ""}`}
+                        onClick={() => setCapitalUsdInput(String(preset))}
+                      >
+                        ${preset}
+                      </button>
+                    ))}
+                    <label className="control execution-capital-input">
+                      <span className="subtle">Your capital</span>
+                      <input
+                        type="number"
+                        min="1"
+                        step="any"
+                        value={capitalUsdInput}
+                        onChange={(event) => setCapitalUsdInput(event.target.value)}
+                      />
+                    </label>
+                  </div>
+                  <div className="execution-scenario-toggle">
+                    <label className="control execution-currency-input">
+                      <span className="subtle">Display currency</span>
+                      <select value={displayCurrency} onChange={(event) => setDisplayCurrency(event.target.value)}>
+                        {currencyOptions.map((currency) => (
+                          <option key={currency} value={currency}>
+                            {currency === "USD" ? "USD - 1.0000" : `${currency} - ${(rates[currency] ?? 0).toFixed(4)}`}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <button
+                      type="button"
+                      className={`overview-button execution-chip ${executionScenario === "best" ? "execution-chip-active" : ""}`}
+                      onClick={() => setExecutionScenario("best")}
+                    >
+                      Best setup
+                    </button>
+                    <button
+                      type="button"
+                      className={`overview-button execution-chip ${executionScenario === "reverse" ? "execution-chip-active" : ""}`}
+                      onClick={() => setExecutionScenario("reverse")}
+                    >
+                      Reverse setup
+                    </button>
+                  </div>
+                </div>
+                <div className="subtle execution-fx-summary">
+                  {fxSummary}
+                  {ratesDate ? ` | rates date ${ratesDate}` : ""}
+                  {ratesLoading ? " | updating FX..." : ""}
+                  {ratesError ? ` | ${ratesError}` : ""}
+                </div>
+
+                <div className="execution-outcome-grid">
+                  {[bestPlan, reversePlan].filter((item): item is NonNullable<typeof bestPlan> => Boolean(item)).map((candidate) => (
+                    <article
+                      key={candidate.scenario}
+                      className={`overview-card execution-outcome-card ${candidate.scenario === executionScenario ? "execution-outcome-card-active" : ""}`}
+                    >
+                      <div className="overview-card-header">
+                        <div>
+                          <p className="eyebrow">{candidate.scenario === "best" ? "Current edge" : "Reverse edge"}</p>
+                          <strong>{candidate.long_leg.display_name} / {candidate.short_leg.display_name}</strong>
+                        </div>
+                        <span className={candidate.expected_net_pnl_usd >= 0 ? "phase-pill" : "overview-badge negative-badge"}>
+                          {formatMoney(candidate.expected_net_pnl_usd)}
+                        </span>
+                      </div>
+                      <div className="detail-grid compare-detail-grid">
+                        <div>
+                          <span className="subtle">Capital used</span>
+                          <strong>{formatMoney(candidate.capital_required_usd)}</strong>
+                        </div>
+                        <div>
+                          <span className="subtle">Gross size / leg</span>
+                          <strong>{formatMoney(candidate.notional_usd)}</strong>
+                        </div>
+                        <div>
+                          <span className="subtle">Fee impact</span>
+                          <strong>{formatMoney(candidate.estimated_total_fees_usd)}</strong>
+                        </div>
+                        <div>
+                          <span className="subtle">Return on capital</span>
+                          <strong>{formatPct(candidate.expected_net_return_on_capital_percent)}</strong>
+                        </div>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+
+                {plan ? (
               <div className="compare-manual-grid">
                 <article className="overview-card compare-execution-card">
                   <div className="overview-card-header">
@@ -318,7 +591,11 @@ export function SymbolComparisonPage({ canonicalSymbol }: { canonicalSymbol: str
                     </div>
                     <div>
                       <span className="subtle">Reference price</span>
-                      <strong>{formatUsd(plan.long_leg.reference_price)}</strong>
+                      <strong>{formatMoney(plan.long_leg.reference_price)}</strong>
+                    </div>
+                    <div>
+                      <span className="subtle">Estimated quantity</span>
+                      <strong>{plan.long_leg.estimated_quantity.toFixed(6)}</strong>
                     </div>
                     <div>
                       <span className="subtle">Taker fee</span>
@@ -326,11 +603,15 @@ export function SymbolComparisonPage({ canonicalSymbol }: { canonicalSymbol: str
                     </div>
                     <div>
                       <span className="subtle">Next funding</span>
-                      <strong>{formatCountdown(bestOpportunity.long_leg.next_funding_time, nowTimestamp)}</strong>
+                      <strong>{formatCountdown(plan.long_leg.side === "buy" ? bestOpportunity.long_leg.next_funding_time : bestOpportunity.short_leg.next_funding_time, nowTimestamp)}</strong>
                     </div>
                     <div>
                       <span className="subtle">Max leverage</span>
-                      <strong>{formatLeverage(bestOpportunity.long_leg.max_leverage)}</strong>
+                      <strong>{formatLeverage(plan.long_leg.side === "buy" ? bestOpportunity.long_leg.max_leverage : bestOpportunity.short_leg.max_leverage)}</strong>
+                    </div>
+                    <div>
+                      <span className="subtle">Margin required</span>
+                      <strong>{formatMoney(plan.long_leg.initial_margin_usd)}</strong>
                     </div>
                   </div>
                   <div className="compare-card-actions">
@@ -355,7 +636,11 @@ export function SymbolComparisonPage({ canonicalSymbol }: { canonicalSymbol: str
                     </div>
                     <div>
                       <span className="subtle">Reference price</span>
-                      <strong>{formatUsd(plan.short_leg.reference_price)}</strong>
+                      <strong>{formatMoney(plan.short_leg.reference_price)}</strong>
+                    </div>
+                    <div>
+                      <span className="subtle">Estimated quantity</span>
+                      <strong>{plan.short_leg.estimated_quantity.toFixed(6)}</strong>
                     </div>
                     <div>
                       <span className="subtle">Taker fee</span>
@@ -363,11 +648,15 @@ export function SymbolComparisonPage({ canonicalSymbol }: { canonicalSymbol: str
                     </div>
                     <div>
                       <span className="subtle">Next funding</span>
-                      <strong>{formatCountdown(bestOpportunity.short_leg.next_funding_time, nowTimestamp)}</strong>
+                      <strong>{formatCountdown(plan.short_leg.side === "sell" ? bestOpportunity.short_leg.next_funding_time : bestOpportunity.long_leg.next_funding_time, nowTimestamp)}</strong>
                     </div>
                     <div>
                       <span className="subtle">Max leverage</span>
-                      <strong>{formatLeverage(bestOpportunity.short_leg.max_leverage)}</strong>
+                      <strong>{formatLeverage(plan.short_leg.side === "sell" ? bestOpportunity.short_leg.max_leverage : bestOpportunity.long_leg.max_leverage)}</strong>
+                    </div>
+                    <div>
+                      <span className="subtle">Margin required</span>
+                      <strong>{formatMoney(plan.short_leg.initial_margin_usd)}</strong>
                     </div>
                   </div>
                   <div className="compare-card-actions">
@@ -390,7 +679,7 @@ export function SymbolComparisonPage({ canonicalSymbol }: { canonicalSymbol: str
                   <div className="detail-grid compare-detail-grid">
                     <div>
                       <span className="subtle">Total fees</span>
-                      <strong>{formatUsd(plan.estimated_total_fees_usd)}</strong>
+                      <strong>{formatMoney(plan.estimated_total_fees_usd)}</strong>
                     </div>
                     <div>
                       <span className="subtle">Funding countdown</span>
@@ -398,11 +687,19 @@ export function SymbolComparisonPage({ canonicalSymbol }: { canonicalSymbol: str
                     </div>
                     <div>
                       <span className="subtle">Funding PnL</span>
-                      <strong>{formatUsd(plan.estimated_funding_pnl_usd)}</strong>
+                      <strong>{formatMoney(plan.estimated_funding_pnl_usd)}</strong>
                     </div>
                     <div>
                       <span className="subtle">Capital required</span>
-                      <strong>{formatUsd(plan.capital_required_usd)}</strong>
+                      <strong>{formatMoney(plan.capital_required_usd)}</strong>
+                    </div>
+                    <div>
+                      <span className="subtle">Projected profit</span>
+                      <strong>{formatMoney(plan.expected_net_pnl_usd)}</strong>
+                    </div>
+                    <div>
+                      <span className="subtle">Projected return</span>
+                      <strong>{formatPct(plan.expected_net_return_on_capital_percent)}</strong>
                     </div>
                   </div>
                   <ul className="warning-list compare-warning-list">
@@ -412,6 +709,13 @@ export function SymbolComparisonPage({ canonicalSymbol }: { canonicalSymbol: str
                   </ul>
                 </article>
               </div>
+                ) : (
+                  <div className="empty-state">
+                    <p>Execution sizing is loading.</p>
+                    <span>The compare page will fill in quantities, fees, and profit once the dry-run is ready.</span>
+                  </div>
+                )}
+              </>
             ) : (
               <div className="empty-state">
                 <p>No manual execution helper is available right now.</p>

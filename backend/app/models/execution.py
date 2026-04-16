@@ -23,7 +23,9 @@ class ExecutionLegPlan(BaseModel):
 
 class ExecutionPlanResponse(BaseModel):
     phase: Literal["phase-2-dry-run"] = "phase-2-dry-run"
+    scenario: Literal["best", "reverse"] = "best"
     canonical_symbol: str
+    capital_input_usd: float | None = None
     notional_usd: float
     leverage: float
     holding_periods: int
