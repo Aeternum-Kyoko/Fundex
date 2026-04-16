@@ -13,6 +13,7 @@ import {
   formatPct,
   formatTimestamp,
   formatUsd,
+  getExchangeCapabilityBadges,
   getExchangeTrustBadge,
   getExchangeTrustReasons,
   getOpportunityTrustBadge,
@@ -63,6 +64,41 @@ function formatLocalizedCurrency(amountUsd: number, currency: string, rates: Rec
     notation: Math.abs(converted) >= 1_000_000 ? "compact" : "standard",
     maximumFractionDigits: 2,
   }).format(converted);
+}
+
+function buildLeverageComfortWarnings(input: {
+  longDisplayName: string;
+  shortDisplayName: string;
+  requestedLeverage: number;
+  longMaxLeverage: number | null | undefined;
+  shortMaxLeverage: number | null | undefined;
+}) {
+  const warnings: string[] = [];
+
+  const evaluateVenue = (label: string, maxLeverage: number | null | undefined) => {
+    if (maxLeverage == null || !Number.isFinite(maxLeverage) || maxLeverage <= 0) {
+      warnings.push(`${label} does not expose max leverage in this feed, so size should be verified on the exchange before entry.`);
+      return;
+    }
+
+    if (input.requestedLeverage > maxLeverage) {
+      warnings.push(
+        `${label} exposes ${formatLeverage(maxLeverage)} max leverage, but this setup models ${formatLeverage(input.requestedLeverage)}. This may require more leverage than the venue exposes.`,
+      );
+      return;
+    }
+
+    if (input.requestedLeverage / maxLeverage >= 0.8) {
+      warnings.push(
+        `${label} only leaves a narrow leverage buffer at ${formatLeverage(maxLeverage)} max, so execution room is tight for this setup.`,
+      );
+    }
+  };
+
+  evaluateVenue(input.longDisplayName, input.longMaxLeverage);
+  evaluateVenue(input.shortDisplayName, input.shortMaxLeverage);
+
+  return warnings;
 }
 
 export function SymbolComparisonPage({ canonicalSymbol }: { canonicalSymbol: string }) {
@@ -142,6 +178,27 @@ export function SymbolComparisonPage({ canonicalSymbol }: { canonicalSymbol: str
     [bestOpportunity?.short_leg.exchange, comparison?.exchanges],
   );
   const decisionTrust = useMemo(() => (bestOpportunity ? getOpportunityTrustBadge(bestOpportunity) : null), [bestOpportunity]);
+  const activeLongLeg = useMemo(
+    () => (bestOpportunity ? (executionScenario === "reverse" ? bestOpportunity.short_leg : bestOpportunity.long_leg) : null),
+    [bestOpportunity, executionScenario],
+  );
+  const activeShortLeg = useMemo(
+    () => (bestOpportunity ? (executionScenario === "reverse" ? bestOpportunity.long_leg : bestOpportunity.short_leg) : null),
+    [bestOpportunity, executionScenario],
+  );
+  const executionLeverageWarnings = useMemo(() => {
+    if (!plan || !activeLongLeg || !activeShortLeg) {
+      return [];
+    }
+
+    return buildLeverageComfortWarnings({
+      longDisplayName: plan.long_leg.display_name,
+      shortDisplayName: plan.short_leg.display_name,
+      requestedLeverage: plan.leverage,
+      longMaxLeverage: activeLongLeg.max_leverage,
+      shortMaxLeverage: activeShortLeg.max_leverage,
+    });
+  }, [activeLongLeg, activeShortLeg, plan]);
   const selectedRate = rates[displayCurrency] ?? 1;
   const fxSummary = useMemo(() => {
     if (displayCurrency === "USD") {
@@ -426,6 +483,13 @@ export function SymbolComparisonPage({ canonicalSymbol }: { canonicalSymbol: str
                       <strong>Feed trust</strong>
                       <span className="subtle">{getExchangeTrustReasons(exchange).join(" | ")}</span>
                     </div>
+                    <div className="quality-badge-row compare-capability-row">
+                      {getExchangeCapabilityBadges(exchange).map((badge) => (
+                        <span key={badge.label} className={`quality-badge quality-${badge.tone}`}>
+                          {badge.label}
+                        </span>
+                      ))}
+                    </div>
                     <div className="quality-badge-row compare-trust-row">
                       {getExchangeTrustReasons(exchange).map((reason) => (
                         <span key={reason} className="quality-badge quality-neutral">
@@ -536,6 +600,17 @@ export function SymbolComparisonPage({ canonicalSymbol }: { canonicalSymbol: str
                   {ratesLoading ? " | updating FX..." : ""}
                   {ratesError ? ` | ${ratesError}` : ""}
                 </div>
+
+                {executionLeverageWarnings.length ? (
+                  <div className="execution-validation-banner">
+                    <strong>Leverage validation</strong>
+                    <ul className="warning-list compare-warning-list">
+                      {executionLeverageWarnings.map((warning) => (
+                        <li key={warning}>{warning}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
 
                 <div className="execution-outcome-grid">
                   {[bestPlan, reversePlan].filter((item): item is NonNullable<typeof bestPlan> => Boolean(item)).map((candidate) => (

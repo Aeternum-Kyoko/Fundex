@@ -5,6 +5,11 @@ export interface TrustBadge {
   tone: "positive" | "warning" | "danger" | "neutral";
 }
 
+export interface CapabilityBadge {
+  label: string;
+  tone: "positive" | "warning" | "neutral";
+}
+
 export function formatPct(value: number, digits = 2) {
   return `${value.toFixed(digits)}%`;
 }
@@ -261,6 +266,28 @@ export function getExchangeTrustReasons(exchange: SymbolComparisonExchangeSnapsh
   }
 
   return reasons.slice(0, 4);
+}
+
+export function getExchangeCapabilityBadges(exchange: SymbolComparisonExchangeSnapshot): CapabilityBadge[] {
+  const badges: CapabilityBadge[] = [];
+
+  if (exchange.next_funding_time) {
+    badges.push({ label: "Exact funding time", tone: "positive" });
+  } else if (exchange.estimated_funding_rate != null) {
+    badges.push({ label: "Estimated funding only", tone: "warning" });
+  } else {
+    badges.push({ label: "Funding timing partial", tone: "neutral" });
+  }
+
+  if (exchange.open_interest_usd != null) {
+    badges.push({ label: "OI available", tone: "positive" });
+  }
+
+  if (exchange.max_leverage != null) {
+    badges.push({ label: "Max leverage available", tone: "positive" });
+  }
+
+  return badges;
 }
 
 export function getOpportunityTrustBadge(opportunity: ArbitrageOpportunity): TrustBadge {

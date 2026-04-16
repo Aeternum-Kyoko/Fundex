@@ -514,6 +514,19 @@ button {
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.22);
 }
 
+.execution-validation-banner {
+  margin-bottom: 18px;
+  padding: 16px 18px;
+  border: 1px solid rgba(255, 202, 122, 0.24);
+  border-radius: 20px;
+  background: linear-gradient(180deg, rgba(255, 202, 122, 0.12), rgba(255, 255, 255, 0.03));
+}
+
+.execution-validation-banner strong {
+  display: block;
+  margin-bottom: 8px;
+}
+
 .decision-summary-panel {
   margin-top: 22px;
 }
@@ -551,6 +564,10 @@ button {
 }
 
 .compare-trust-row {
+  margin-top: 12px;
+}
+
+.compare-capability-row {
   margin-top: 12px;
 }
 
