@@ -182,10 +182,12 @@ class TradeManager:
 
         entry_at = pair_funding_time - timedelta(seconds=request.schedule.entry_seconds_before_funding)
         exit_at = pair_funding_time + timedelta(seconds=request.schedule.exit_seconds_after_funding)
+        cancellable_until = entry_at - timedelta(minutes=10)
         now = _utcnow()
         warnings = list(plan.warnings)
         if entry_at <= now:
             entry_at = now + timedelta(seconds=2)
+            cancellable_until = min(cancellable_until, now)
             warnings.append("The setup was armed too close to funding, so entry will begin almost immediately.")
 
         long_live_supported, long_support_note = _support_for_exchange(execution_target.long_leg.exchange)
@@ -219,6 +221,7 @@ class TradeManager:
             pair_funding_time=pair_funding_time,
             scheduled_entry_at=entry_at,
             scheduled_exit_at=exit_at,
+            cancellable_until=cancellable_until,
             capital_input_usd=request.capital_usd,
             leverage=request.leverage,
             holding_periods=request.holding_periods,
@@ -271,6 +274,10 @@ class TradeManager:
                 raise HTTPException(status_code=404, detail="Trade session not found.")
             if record.response.status in {"completed", "failed", "cancelled"}:
                 return record.response
+            if record.response.status != "armed":
+                raise HTTPException(status_code=400, detail="This trade can no longer be cancelled because execution has already started.")
+            if record.response.cancellable_until is not None and _utcnow() >= record.response.cancellable_until:
+                raise HTTPException(status_code=400, detail="This trade is locked during the final 10 minutes before entry.")
             record.response.status = "cancelled"
             record.response.current_phase = "Cancelled before execution"
             record.response.updated_at = _utcnow()

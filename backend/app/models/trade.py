@@ -81,6 +81,7 @@ class TradeSessionResponse(BaseModel):
     pair_funding_time: datetime | None = None
     scheduled_entry_at: datetime | None = None
     scheduled_exit_at: datetime | None = None
+    cancellable_until: datetime | None = None
     capital_input_usd: float
     leverage: float
     holding_periods: int

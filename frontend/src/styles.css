@@ -772,6 +772,74 @@ button {
   margin-top: 18px;
 }
 
+.trade-report-panel {
+  display: grid;
+  gap: 20px;
+}
+
+.trade-report-body {
+  display: grid;
+  gap: 20px;
+}
+
+.trade-report-summary-grid {
+  margin-bottom: 0;
+}
+
+.trade-report-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.trade-report-card {
+  padding: 22px;
+}
+
+.trade-summary-tone {
+  border-color: rgba(170, 184, 229, 0.18);
+}
+
+.trade-summary-tone-positive {
+  box-shadow: inset 0 1px 0 rgba(134, 247, 195, 0.22);
+}
+
+.trade-summary-tone-danger {
+  box-shadow: inset 0 1px 0 rgba(255, 122, 122, 0.18);
+}
+
+.trade-session-actions {
+  justify-content: flex-end;
+}
+
+.trade-history-actions {
+  justify-content: flex-start;
+}
+
+.trade-inline-note {
+  margin-top: 10px;
+}
+
+.trade-leg-link {
+  margin-top: 14px;
+}
+
+.trade-event-card {
+  padding: 22px;
+}
+
+.trade-event-log {
+  border-left: 3px solid rgba(170, 184, 229, 0.24);
+}
+
+.trade-event-level-warning {
+  border-left-color: rgba(255, 193, 118, 0.55);
+}
+
+.trade-event-level-error {
+  border-left-color: rgba(255, 122, 122, 0.58);
+}
+
 .trade-history-item {
   display: grid;
   gap: 14px;
@@ -790,6 +858,10 @@ button {
 
 .paper-guide-modal {
   width: min(960px, 100%);
+}
+
+.trade-summary-modal {
+  width: min(1100px, 100%);
 }
 
 .trade-guide-grid {
@@ -1814,6 +1886,7 @@ button {
   .trade-credentials-grid,
   .trade-guide-grid,
   .trade-history-metrics,
+  .trade-report-grid,
   .decision-summary-grid,
   .execution-outcome-grid,
   .compare-card-grid,
@@ -1894,6 +1967,7 @@ button {
   .trade-credentials-grid,
   .trade-guide-grid,
   .trade-history-metrics,
+  .trade-report-grid,
   .decision-summary-grid,
   .execution-outcome-grid,
   .compare-card-grid,

@@ -1,3 +1,4 @@
+import { jsPDF } from "jspdf";
 import { useMemo, useRef, useState } from "react";
 import { useExecutionPlan } from "../hooks/useExecutionPlan";
 import { useNow } from "../hooks/useNow";
@@ -16,11 +17,12 @@ import {
   getNextFundingTime,
 } from "../lib/monitor";
 import type { ExchangeName } from "../lib/types";
-import type { TradeCredentialInput } from "../lib/trade-types";
+import type { TradeCredentialInput, TradeLegExecution, TradeSessionResponse } from "../lib/trade-types";
 
 const TRADE_CREDENTIALS_KEY = "arbradar-trade-credentials";
 const PAPER_GUIDE_KEY = "arbradar-paper-guide-seen";
 const DEFAULT_COINSWITCH_EXCHANGE = "EXCHANGE_2";
+const CANCEL_LOCK_WINDOW_MINUTES = 10;
 
 type TradeCredentialState = Record<string, { api_key: string; api_secret: string; extra?: Record<string, string> }>;
 
@@ -39,16 +41,28 @@ function buildSupportNote(exchange: ExchangeName) {
   }
 }
 
-function exportCredentialFile(credentials: TradeCredentialState) {
-  const blob = new Blob([JSON.stringify({ version: 1, credentials }, null, 2)], { type: "application/json" });
+function triggerFileDownload(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `arbradar-trade-keys-${new Date().toISOString().slice(0, 19)}.json`;
+  link.download = filename;
+  link.rel = "noopener";
   document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+  link.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+  window.setTimeout(() => {
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, 1000);
+}
+
+function exportCredentialFile(credentials: TradeCredentialState) {
+  const payload = {
+    version: 1,
+    generated_at: new Date().toISOString(),
+    credentials,
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  triggerFileDownload(blob, `arbradar-trade-keys-${new Date().toISOString().slice(0, 19).replace(/:/g, "-")}.json`);
 }
 
 function readPaperGuideSeen() {
@@ -101,6 +115,10 @@ function hasAnySavedCredentials(credentials: TradeCredentialState) {
   return Object.values(credentials).some((item) => item.api_key || item.api_secret || Object.keys(item.extra ?? {}).length);
 }
 
+function getExportableCredentials(credentials: TradeCredentialState) {
+  return normalizeCredentialState(credentials);
+}
+
 function readStoredCredentials(): TradeCredentialState {
   if (typeof window === "undefined") return {};
   try {
@@ -109,6 +127,279 @@ function readStoredCredentials(): TradeCredentialState {
   } catch {
     return {};
   }
+}
+
+function isTerminalTradeStatus(status: TradeSessionResponse["status"]) {
+  return ["completed", "failed", "cancelled"].includes(status);
+}
+
+function getTradeResultTone(session: TradeSessionResponse) {
+  const net = session.realized_net_pnl_usd ?? session.expected_net_pnl_usd;
+  if (net > 0) return "positive";
+  if (net < 0) return "danger";
+  return "neutral";
+}
+
+function getTradeNetReturnPercent(session: TradeSessionResponse) {
+  if (session.realized_net_pnl_usd != null && session.capital_input_usd > 0) {
+    return (session.realized_net_pnl_usd / session.capital_input_usd) * 100;
+  }
+  return session.expected_net_return_on_capital_percent;
+}
+
+function getTradeLegLabel(leg: TradeLegExecution) {
+  return leg.side === "buy" ? "Long leg" : "Short leg";
+}
+
+function canCancelTrade(session: TradeSessionResponse | null, nowTimestamp: number) {
+  if (!session || session.status !== "armed" || !session.cancellable_until) {
+    return false;
+  }
+  return new Date(session.cancellable_until).getTime() > nowTimestamp;
+}
+
+function getCancelTradeNote(session: TradeSessionResponse | null, nowTimestamp: number) {
+  if (!session) {
+    return "No armed trade yet.";
+  }
+  if (isTerminalTradeStatus(session.status)) {
+    return `This trade is already ${session.status}.`;
+  }
+  if (session.status !== "armed") {
+    return "Execution has already started, so cancellation is no longer available.";
+  }
+  if (!session.cancellable_until) {
+    return `Trades lock ${CANCEL_LOCK_WINDOW_MINUTES} minutes before the entry window.`;
+  }
+  if (!canCancelTrade(session, nowTimestamp)) {
+    return `Trades lock during the final ${CANCEL_LOCK_WINDOW_MINUTES} minutes before entry.`;
+  }
+  return `Cancellation stays open until ${formatCountdown(session.cancellable_until, nowTimestamp)}.`;
+}
+
+function buildTradePdf(session: TradeSessionResponse) {
+  const doc = new jsPDF({ unit: "pt", format: "a4" });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 40;
+  const usableWidth = pageWidth - margin * 2;
+  let cursorY = margin;
+
+  const ensureSpace = (height: number) => {
+    if (cursorY + height <= pageHeight - margin) {
+      return;
+    }
+    doc.addPage();
+    cursorY = margin;
+  };
+
+  const addBlock = (text: string, options?: { size?: number; bold?: boolean; spacingBefore?: number; spacingAfter?: number }) => {
+    const size = options?.size ?? 11;
+    const lineHeight = size * 1.45;
+    cursorY += options?.spacingBefore ?? 0;
+    doc.setFont("helvetica", options?.bold ? "bold" : "normal");
+    doc.setFontSize(size);
+    const lines = doc.splitTextToSize(text, usableWidth) as string[];
+    ensureSpace(lines.length * lineHeight + (options?.spacingAfter ?? 0));
+    lines.forEach((line) => {
+      doc.text(line, margin, cursorY);
+      cursorY += lineHeight;
+    });
+    cursorY += options?.spacingAfter ?? 0;
+  };
+
+  const addRule = () => {
+    ensureSpace(18);
+    doc.setDrawColor(190, 198, 216);
+    doc.line(margin, cursorY, pageWidth - margin, cursorY);
+    cursorY += 14;
+  };
+
+  const addMetric = (label: string, value: string) => addBlock(`${label}: ${value}`);
+  const addLegDetails = (title: string, leg: TradeLegExecution) => {
+    addBlock(title, { size: 13, bold: true, spacingBefore: 8, spacingAfter: 4 });
+    addMetric("Exchange", `${leg.display_name} (${leg.exchange_symbol})`);
+    addMetric("Side", leg.side.toUpperCase());
+    addMetric("Reference price", formatUsd(leg.reference_price));
+    addMetric("Quantity", leg.estimated_quantity.toFixed(6));
+    addMetric("Leverage", `${leg.leverage.toFixed(2)}x`);
+    addMetric("Max leverage", formatLeverage(leg.max_leverage));
+    addMetric("Notional", formatUsd(leg.notional_usd));
+    addMetric("Initial margin", formatUsd(leg.initial_margin_usd));
+    addMetric("Entry order ID", leg.entry_order_id ?? "pending");
+    addMetric("Exit order ID", leg.exit_order_id ?? "pending");
+    addMetric("Entry fill", formatUsd(leg.entry_fill_price));
+    addMetric("Exit fill", formatUsd(leg.exit_fill_price));
+    if (leg.support_note) {
+      addMetric("Support note", leg.support_note);
+    }
+    addMetric("Trade URL", leg.trade_url);
+  };
+
+  addBlock(`ArbRadar Trade Report`, { size: 18, bold: true, spacingAfter: 6 });
+  addBlock(`${session.canonical_symbol} | ${session.mode === "paper" ? "Paper" : "Live"} | ${session.scenario === "best" ? "Best setup" : "Reverse setup"}`, {
+    size: 12,
+    spacingAfter: 12,
+  });
+  addRule();
+  addBlock("Summary", { size: 14, bold: true, spacingAfter: 4 });
+  addMetric("Status", session.status);
+  addMetric("Current phase", session.current_phase);
+  addMetric("Created at", formatTimestamp(session.created_at));
+  addMetric("Updated at", formatTimestamp(session.updated_at));
+  addMetric("Pair funding time", formatTimestamp(session.pair_funding_time));
+  addMetric("Scheduled entry", formatTimestamp(session.scheduled_entry_at));
+  addMetric("Scheduled exit", formatTimestamp(session.scheduled_exit_at));
+  addMetric("Cancel until", formatTimestamp(session.cancellable_until));
+  addMetric("Capital", formatUsd(session.capital_input_usd));
+  addMetric("Leverage", `${session.leverage.toFixed(2)}x`);
+  addMetric("Projected net", formatUsd(session.expected_net_pnl_usd));
+  addMetric("Projected return", formatPct(session.expected_net_return_on_capital_percent));
+  addMetric("Projected funding capture", formatUsd(session.expected_funding_pnl_usd));
+  addMetric("Estimated total fees", formatUsd(session.estimated_total_fees_usd));
+  addMetric("Realized price PnL", formatUsd(session.realized_price_pnl_usd));
+  addMetric("Realized funding PnL", formatUsd(session.realized_funding_pnl_usd));
+  addMetric("Realized total fees", formatUsd(session.realized_total_fees_usd));
+  addMetric("Realized net", formatUsd(session.realized_net_pnl_usd));
+  addMetric("Net return on capital", formatPct(getTradeNetReturnPercent(session)));
+
+  addRule();
+  addLegDetails("Long side", session.long_leg);
+  addRule();
+  addLegDetails("Short side", session.short_leg);
+
+  if (session.warnings.length) {
+    addRule();
+    addBlock("Warnings", { size: 14, bold: true, spacingAfter: 4 });
+    session.warnings.forEach((warning, index) => addBlock(`${index + 1}. ${warning}`));
+  }
+
+  addRule();
+  addBlock("Event log", { size: 14, bold: true, spacingAfter: 4 });
+  session.events.forEach((event, index) => {
+    addBlock(`${index + 1}. [${event.level.toUpperCase()}] ${formatTimestamp(event.at)} | ${event.phase} | ${event.message}`);
+  });
+
+  return doc;
+}
+
+function exportTradePdf(session: TradeSessionResponse) {
+  const doc = buildTradePdf(session);
+  doc.save(`arbradar-trade-report-${session.canonical_symbol}-${session.id.slice(0, 8)}.pdf`);
+}
+
+function TradeReportContent({ session, nowTimestamp }: { session: TradeSessionResponse; nowTimestamp: number }) {
+  const netTone = getTradeResultTone(session);
+  const netReturnPercent = getTradeNetReturnPercent(session);
+
+  return (
+    <div className="trade-report-body">
+      <div className="summary-grid compare-summary-grid trade-report-summary-grid">
+        <article className="summary-card"><span className="subtle">Status</span><strong>{session.status}</strong></article>
+        <article className="summary-card"><span className="subtle">Capital</span><strong>{formatUsd(session.capital_input_usd)}</strong></article>
+        <article className="summary-card"><span className="subtle">Leverage</span><strong>{session.leverage.toFixed(2)}x</strong></article>
+        <article className="summary-card"><span className="subtle">Pair funding</span><strong>{formatTimestamp(session.pair_funding_time)}</strong></article>
+        <article className="summary-card"><span className="subtle">Scheduled entry</span><strong>{formatTimestamp(session.scheduled_entry_at)}</strong></article>
+        <article className="summary-card"><span className="subtle">Scheduled exit</span><strong>{formatTimestamp(session.scheduled_exit_at)}</strong></article>
+        <article className="summary-card"><span className="subtle">Cancel until</span><strong>{formatTimestamp(session.cancellable_until)}</strong></article>
+        <article className="summary-card"><span className="subtle">Current phase</span><strong>{session.current_phase}</strong></article>
+        <article className="summary-card"><span className="subtle">Projected net</span><strong>{formatUsd(session.expected_net_pnl_usd)}</strong></article>
+        <article className="summary-card"><span className="subtle">Projected return</span><strong>{formatPct(session.expected_net_return_on_capital_percent)}</strong></article>
+        <article className="summary-card"><span className="subtle">Realized net</span><strong>{formatUsd(session.realized_net_pnl_usd ?? session.expected_net_pnl_usd)}</strong></article>
+        <article className={`summary-card trade-summary-tone trade-summary-tone-${netTone}`}><span className="subtle">Net return on capital</span><strong>{formatPct(netReturnPercent)}</strong></article>
+      </div>
+
+      <div className="trade-plan-grid">
+        {[session.long_leg, session.short_leg].map((leg) => (
+          <article key={`${session.id}-${leg.exchange}-${leg.exchange_symbol}`} className={`overview-card compare-exchange-card ${exchangeToneClass(leg.exchange)}`}>
+            <div className="overview-card-header">
+              <div>
+                <p className="eyebrow">{getTradeLegLabel(leg)}</p>
+                <strong>{leg.display_name}</strong>
+              </div>
+              <span className={`quality-badge quality-${leg.status === "closed" ? "positive" : leg.status === "failed" ? "danger" : "neutral"}`}>{leg.status}</span>
+            </div>
+            <div className="detail-grid compare-detail-grid">
+              <div><span className="subtle">Exchange symbol</span><strong>{leg.exchange_symbol}</strong></div>
+              <div><span className="subtle">Side</span><strong>{leg.side.toUpperCase()}</strong></div>
+              <div><span className="subtle">Reference price</span><strong>{formatUsd(leg.reference_price)}</strong></div>
+              <div><span className="subtle">Quantity</span><strong>{leg.estimated_quantity.toFixed(6)}</strong></div>
+              <div><span className="subtle">Leverage</span><strong>{leg.leverage.toFixed(2)}x</strong></div>
+              <div><span className="subtle">Max leverage</span><strong>{formatLeverage(leg.max_leverage)}</strong></div>
+              <div><span className="subtle">Notional</span><strong>{formatUsd(leg.notional_usd)}</strong></div>
+              <div><span className="subtle">Initial margin</span><strong>{formatUsd(leg.initial_margin_usd)}</strong></div>
+              <div><span className="subtle">Entry order ID</span><strong>{leg.entry_order_id ?? "pending"}</strong></div>
+              <div><span className="subtle">Exit order ID</span><strong>{leg.exit_order_id ?? "pending"}</strong></div>
+              <div><span className="subtle">Entry fill</span><strong>{formatUsd(leg.entry_fill_price)}</strong></div>
+              <div><span className="subtle">Exit fill</span><strong>{formatUsd(leg.exit_fill_price)}</strong></div>
+            </div>
+            {leg.support_note ? <p className="subtle trade-support-note">{leg.support_note}</p> : null}
+            <a href={leg.trade_url} target="_blank" rel="noreferrer" className="action-button secondary-button trade-leg-link">
+              Open {leg.display_name}
+            </a>
+          </article>
+        ))}
+      </div>
+
+      <div className="trade-report-grid">
+        <article className="overview-card trade-report-card">
+          <div className="overview-card-header">
+            <div>
+              <p className="eyebrow">Outcome</p>
+              <strong>{session.realized_net_pnl_usd == null ? "Projected until completion" : "Completed trade outcome"}</strong>
+            </div>
+          </div>
+          <div className="detail-grid compare-detail-grid">
+            <div><span className="subtle">Projected funding capture</span><strong>{formatUsd(session.expected_funding_pnl_usd)}</strong></div>
+            <div><span className="subtle">Estimated fees</span><strong>{formatUsd(session.estimated_total_fees_usd)}</strong></div>
+            <div><span className="subtle">Realized price PnL</span><strong>{formatUsd(session.realized_price_pnl_usd)}</strong></div>
+            <div><span className="subtle">Realized funding PnL</span><strong>{formatUsd(session.realized_funding_pnl_usd)}</strong></div>
+            <div><span className="subtle">Realized total fees</span><strong>{formatUsd(session.realized_total_fees_usd)}</strong></div>
+            <div><span className="subtle">Updated</span><strong>{formatTimestamp(session.updated_at)}</strong></div>
+          </div>
+        </article>
+
+        <article className="overview-card trade-report-card">
+          <div className="overview-card-header">
+            <div>
+              <p className="eyebrow">Warnings</p>
+              <strong>{session.warnings.length ? `${session.warnings.length} item${session.warnings.length === 1 ? "" : "s"}` : "No warnings recorded"}</strong>
+            </div>
+          </div>
+          {session.warnings.length ? (
+            <ul className="warning-list compare-warning-list">
+              {session.warnings.map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className="subtle">The session finished without adding extra warnings beyond the initial risk checks.</p>
+          )}
+          <p className="subtle trade-inline-note">{getCancelTradeNote(session, nowTimestamp)}</p>
+        </article>
+      </div>
+
+      <article className="overview-card trade-report-card trade-event-card">
+        <div className="overview-card-header">
+          <div>
+            <p className="eyebrow">Event Log</p>
+            <strong>{session.events.length} event{session.events.length === 1 ? "" : "s"} captured</strong>
+          </div>
+        </div>
+        <div className="recent-alert-list">
+          {session.events.map((event) => (
+            <div key={`${session.id}-${event.at}-${event.phase}-${event.message}`} className={`alert-log-item trade-event-log trade-event-level-${event.level}`}>
+              <div className="alert-item-top">
+                <strong>{event.phase}</strong>
+                <span>{formatTimestamp(event.at)}</span>
+              </div>
+              <div className="subtle">{event.message}</div>
+            </div>
+          ))}
+        </div>
+      </article>
+    </div>
+  );
 }
 
 export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }) {
@@ -121,6 +412,7 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
   const [rememberCredentials, setRememberCredentials] = useState(() => Object.keys(readStoredCredentials()).length > 0);
   const [credentials, setCredentials] = useState<TradeCredentialState>(() => readStoredCredentials());
   const [isPaperGuideOpen, setIsPaperGuideOpen] = useState(() => !readPaperGuideSeen());
+  const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
   const [credentialFileNotice, setCredentialFileNotice] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const nowTimestamp = useNow(1000);
@@ -237,6 +529,22 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
     () => history.filter((item) => item.canonical_symbol.toUpperCase() === canonicalSymbol.toUpperCase()),
     [canonicalSymbol, history],
   );
+  const reportSessions = useMemo(() => {
+    const next = new Map<string, TradeSessionResponse>();
+    if (session) {
+      next.set(session.id, session);
+    }
+    localTradeHistory.forEach((item) => {
+      if (!next.has(item.id)) {
+        next.set(item.id, item);
+      }
+    });
+    return next;
+  }, [localTradeHistory, session]);
+  const selectedReportSession = selectedReportId ? reportSessions.get(selectedReportId) ?? null : null;
+  const completedSession = session && isTerminalTradeStatus(session.status) ? session : null;
+  const sessionCanCancel = canCancelTrade(session, nowTimestamp);
+  const cancelTradeNote = getCancelTradeNote(session, nowTimestamp);
 
   const armTrade = async () => {
     if (!activeOpportunity) return;
@@ -267,12 +575,13 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
   };
 
   const exportKeysFile = () => {
-    if (!hasAnySavedCredentials(credentials)) {
-      setCredentialFileNotice("No saved live credentials are available to export yet.");
+    const exportableCredentials = getExportableCredentials(credentials);
+    if (!hasAnySavedCredentials(exportableCredentials)) {
+      setCredentialFileNotice("No live credentials are ready to export yet. Enter your real exchange keys first, then export them.");
       return;
     }
-    exportCredentialFile(credentials);
-    setCredentialFileNotice("Credential file exported locally. Keep it in a safe place.");
+    exportCredentialFile(exportableCredentials);
+    setCredentialFileNotice(`Credential file exported locally for ${Object.keys(exportableCredentials).join(", ")}. Keep it somewhere safe.`);
   };
 
   const importKeysFile = async (file: File) => {
@@ -332,6 +641,7 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
         <article className="summary-card"><span className="subtle">Pair funding</span><strong>{fundingTime ? formatCountdown(fundingTime, nowTimestamp) : "n/a"}</strong></article>
         <article className="summary-card"><span className="subtle">Entry starts</span><strong>{scheduledEntryAt ? formatCountdown(scheduledEntryAt, nowTimestamp) : "n/a"}</strong></article>
         <article className="summary-card"><span className="subtle">Exit starts</span><strong>{scheduledExitAt ? formatCountdown(scheduledExitAt, nowTimestamp) : "n/a"}</strong></article>
+        <article className="summary-card"><span className="subtle">Cancel closes</span><strong>{scheduledEntryAt ? formatCountdown(new Date(new Date(scheduledEntryAt).getTime() - CANCEL_LOCK_WINDOW_MINUTES * 60_000).toISOString(), nowTimestamp) : "n/a"}</strong></article>
         <article className="summary-card"><span className="subtle">Mode</span><strong>{paperTradingEnabled ? "paper" : "live"}</strong></article>
         <article className="summary-card"><span className="subtle">Scenario</span><strong>{scenario === "best" ? "Best setup" : "Reverse setup"}</strong></article>
       </section>
@@ -520,8 +830,14 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
             </div>
 
             <div className="button-row">
-              <button type="button" className="action-button secondary-button" onClick={() => void cancelSession(session.id)} disabled={sessionLoading || ["completed", "failed", "cancelled"].includes(session.status)}>Cancel session</button>
+              <button type="button" className="action-button secondary-button" onClick={() => void cancelSession(session.id)} disabled={sessionLoading || !sessionCanCancel}>Cancel session</button>
+              {isTerminalTradeStatus(session.status) ? (
+                <button type="button" className="action-button secondary-button" onClick={() => exportTradePdf(session)}>
+                  Export PDF
+                </button>
+              ) : null}
             </div>
+            <p className="subtle trade-inline-note">{cancelTradeNote}</p>
 
             <div className="recent-alert-list">
               {session.events.map((event) => (
@@ -548,6 +864,27 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
           </div>
         )}
       </section>
+
+      {completedSession ? (
+        <section className="panel compare-panel trade-report-panel">
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">Completed Trade Summary</p>
+              <h2>Full post-trade report</h2>
+              <div className="subtle">This report keeps the full event timeline, both legs, realized result, and the exact trade context so you can review what happened end to end.</div>
+            </div>
+            <div className="button-row trade-session-actions">
+              <button type="button" className="action-button secondary-button" onClick={() => setSelectedReportId(completedSession.id)}>
+                Open full summary
+              </button>
+              <button type="button" className="action-button secondary-button" onClick={() => exportTradePdf(completedSession)}>
+                Export PDF
+              </button>
+            </div>
+          </div>
+          <TradeReportContent session={completedSession} nowTimestamp={nowTimestamp} />
+        </section>
+      ) : null}
 
       <section className="panel compare-panel">
         <div className="panel-header">
@@ -579,6 +916,14 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
                   <div><span className="subtle">Leverage</span><strong>{item.leverage.toFixed(2)}x</strong></div>
                   <div><span className="subtle">{item.realized_net_pnl_usd == null ? "Projected net" : "Realized net"}</span><strong>{formatUsd(item.realized_net_pnl_usd ?? item.expected_net_pnl_usd)}</strong></div>
                   <div><span className="subtle">Entry window</span><strong>{item.scheduled_entry_at ? formatTimestamp(item.scheduled_entry_at) : "n/a"}</strong></div>
+                </div>
+                <div className="button-row trade-history-actions">
+                  <button type="button" className="action-button secondary-button" onClick={() => setSelectedReportId(item.id)}>
+                    View full summary
+                  </button>
+                  <button type="button" className="action-button secondary-button" onClick={() => exportTradePdf(item)}>
+                    Export PDF
+                  </button>
                 </div>
               </article>
             ))}
@@ -637,6 +982,29 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
                 Continue in paper mode
               </button>
             </div>
+          </aside>
+        </div>
+      ) : null}
+
+      {selectedReportSession ? (
+        <div className="modal-backdrop" onClick={() => setSelectedReportId(null)}>
+          <aside className="inspector-modal trade-summary-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+            <div className="inspector-header">
+              <div>
+                <p className="eyebrow">Trade Summary</p>
+                <h3>{selectedReportSession.canonical_symbol}</h3>
+                <p className="subtle">Full local report for this {selectedReportSession.mode} {selectedReportSession.scenario === "best" ? "best-setup" : "reverse-setup"} trade, including every event recorded during the session.</p>
+              </div>
+              <div className="button-row trade-session-actions">
+                <button type="button" className="action-button secondary-button" onClick={() => exportTradePdf(selectedReportSession)}>
+                  Export PDF
+                </button>
+                <button type="button" className="close-button" onClick={() => setSelectedReportId(null)}>
+                  Close
+                </button>
+              </div>
+            </div>
+            <TradeReportContent session={selectedReportSession} nowTimestamp={nowTimestamp} />
           </aside>
         </div>
       ) : null}

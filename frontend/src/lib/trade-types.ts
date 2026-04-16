@@ -67,6 +67,7 @@ export interface TradeSessionResponse {
   pair_funding_time: string | null;
   scheduled_entry_at: string | null;
   scheduled_exit_at: string | null;
+  cancellable_until: string | null;
   capital_input_usd: number;
   leverage: number;
   holding_periods: number;
