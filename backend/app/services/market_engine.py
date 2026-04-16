@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import logging
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from httpx import AsyncClient
 
@@ -34,9 +35,24 @@ class MarketEngine:
         self.tasks: list[asyncio.Task[None]] = []
         self._metrics: dict[str, dict[str, int | float | str | None]] = {
             "adapters": {},
-            "retention": {"runs": 0, "last_run_at": None, "last_deleted_total": 0},
+            "retention": {
+                "runs": 0,
+                "last_run_at": None,
+                "last_deleted_total": 0,
+                "last_verification_at": None,
+                "last_verification_local_date": None,
+                "last_verification_ok": None,
+            },
             "telegram": {"bot_polls": 0, "bot_poll_errors": 0, "last_processed_updates": 0},
         }
+        try:
+            self._retention_timezone = ZoneInfo(self.settings.telegram_daily_summary_timezone)
+        except ZoneInfoNotFoundError:
+            logger.warning(
+                "Invalid timezone %s for retention verification logs; falling back to UTC",
+                self.settings.telegram_daily_summary_timezone,
+            )
+            self._retention_timezone = timezone.utc
 
         if settings.binance_enabled:
             self.adapters.append(BinanceAdapter(self.client, settings))
@@ -84,6 +100,7 @@ class MarketEngine:
                 all_snapshots = await self.store.get_snapshots()
                 opportunities = build_opportunities(all_snapshots, self.settings)
                 await self._prune_if_due()
+                await self._verify_daily_retention_cleanup()
                 await self.telegram_notifier.notify(opportunities)
                 if await self._daily_summary_ready():
                     await self.telegram_notifier.notify_daily_summary(all_snapshots, opportunities)
@@ -152,6 +169,48 @@ class MarketEngine:
             stats["opportunity_history_deleted"],
             stats["telegram_alert_state_deleted"],
         )
+
+    async def _verify_daily_retention_cleanup(self) -> None:
+        now_utc = datetime.now(timezone.utc)
+        local_now = now_utc.astimezone(self._retention_timezone)
+        local_date = local_now.date().isoformat()
+
+        if self._metrics["retention"].get("last_verification_local_date") == local_date:
+            return
+
+        storage_stats = await self.history_store.get_storage_stats()
+        retention_status = self.history_store.retention_status
+        last_prune_at = retention_status.get("ran_at")
+        prune_ran_today = False
+        if isinstance(last_prune_at, str) and last_prune_at:
+            try:
+                prune_ran_today = datetime.fromisoformat(last_prune_at).astimezone(self._retention_timezone).date().isoformat() == local_date
+            except ValueError:
+                prune_ran_today = False
+
+        self._metrics["retention"]["last_verification_at"] = now_utc.isoformat()
+        self._metrics["retention"]["last_verification_local_date"] = local_date
+        self._metrics["retention"]["last_verification_ok"] = prune_ran_today
+
+        log_message = (
+            "Daily retention verification (%s): prune_ran_today=%s, "
+            "db_size_bytes=%s, funding_snapshot_rows=%s, opportunity_history_rows=%s, "
+            "telegram_alert_state_rows=%s, telegram_daily_summary_rows=%s, last_prune_at=%s"
+        )
+        log_args = (
+            local_date,
+            prune_ran_today,
+            storage_stats["database_size_bytes"],
+            storage_stats["funding_snapshot_rows"],
+            storage_stats["opportunity_history_rows"],
+            storage_stats["telegram_alert_state_rows"],
+            storage_stats["telegram_daily_summary_rows"],
+            last_prune_at,
+        )
+        if prune_ran_today:
+            logger.info(log_message, *log_args)
+        else:
+            logger.warning(log_message, *log_args)
 
     async def _seed_statuses(self) -> None:
         status_definitions = [

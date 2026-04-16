@@ -65,3 +65,18 @@ class HistoryStoreRetentionTests(unittest.IsolatedAsyncioTestCase):
         assert state is not None
         self.assertEqual(state["last_sent_local_date"], "2026-04-09")
         self.assertIn("last_sent_at", state)
+
+    async def test_get_storage_stats_returns_counts_and_db_size(self) -> None:
+        now = datetime.now(timezone.utc)
+        await self.store.save_snapshots([make_snapshot(exchange="binance", fetched_at=now)])
+        await self.store.save_opportunities([make_opportunity(canonical_symbol="BTC-USDT-PERP", updated_at=now)])
+        await self.store.mark_symbol_alert_exited("BTC-USDT-PERP", "test")
+        await self.store.mark_daily_summary_sent("2026-04-17")
+
+        stats = await self.store.get_storage_stats()
+
+        self.assertGreaterEqual(stats["funding_snapshot_rows"], 1)
+        self.assertGreaterEqual(stats["opportunity_history_rows"], 1)
+        self.assertGreaterEqual(stats["telegram_alert_state_rows"], 1)
+        self.assertGreaterEqual(stats["telegram_daily_summary_rows"], 1)
+        self.assertGreater(stats["database_size_bytes"], 0)

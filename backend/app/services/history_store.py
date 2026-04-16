@@ -31,6 +31,10 @@ class HistoryStore:
     def retention_status(self) -> dict[str, int | str | None]:
         return dict(self._last_retention_stats)
 
+    async def get_storage_stats(self) -> dict[str, int]:
+        async with self._lock:
+            return await asyncio.to_thread(self._get_storage_stats_sync)
+
     def _initialize(self) -> None:
         with self._connect() as connection:
             connection.executescript(
@@ -98,6 +102,30 @@ class HistoryStore:
                 );
                 """
             )
+
+    def _get_storage_stats_sync(self) -> dict[str, int]:
+        with self._connect() as connection:
+            funding_snapshot_rows = int(
+                connection.execute("SELECT COUNT(*) AS total FROM funding_snapshots").fetchone()["total"]
+            )
+            opportunity_history_rows = int(
+                connection.execute("SELECT COUNT(*) AS total FROM opportunity_history").fetchone()["total"]
+            )
+            telegram_alert_state_rows = int(
+                connection.execute("SELECT COUNT(*) AS total FROM telegram_symbol_alert_state").fetchone()["total"]
+            )
+            telegram_daily_summary_rows = int(
+                connection.execute("SELECT COUNT(*) AS total FROM telegram_daily_summary_state").fetchone()["total"]
+            )
+
+        database_size_bytes = int(self.database_path.stat().st_size) if self.database_path.exists() else 0
+        return {
+            "funding_snapshot_rows": funding_snapshot_rows,
+            "opportunity_history_rows": opportunity_history_rows,
+            "telegram_alert_state_rows": telegram_alert_state_rows,
+            "telegram_daily_summary_rows": telegram_daily_summary_rows,
+            "database_size_bytes": database_size_bytes,
+        }
 
     async def save_snapshots(self, snapshots: list[FundingSnapshot]) -> None:
         if not snapshots:
