@@ -40,6 +40,23 @@ class TradeCreateRequest(BaseModel):
     credentials: list[TradeCredentialInput] = Field(default_factory=list)
 
 
+class TradeCredentialVerificationRequest(BaseModel):
+    required_exchanges: list[ExchangeName] = Field(default_factory=list)
+    credentials: list[TradeCredentialInput] = Field(default_factory=list)
+
+
+class TradeCredentialVerificationResult(BaseModel):
+    exchange: ExchangeName
+    ok: bool
+    message: str
+
+
+class TradeCredentialVerificationResponse(BaseModel):
+    ok: bool
+    checked_at: datetime
+    results: list[TradeCredentialVerificationResult] = Field(default_factory=list)
+
+
 class TradeEvent(BaseModel):
     at: datetime
     phase: str

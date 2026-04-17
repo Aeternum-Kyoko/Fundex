@@ -26,6 +26,23 @@ export interface TradeCreateRequest {
   credentials: TradeCredentialInput[];
 }
 
+export interface TradeCredentialVerificationRequest {
+  required_exchanges: ExchangeName[];
+  credentials: TradeCredentialInput[];
+}
+
+export interface TradeCredentialVerificationResult {
+  exchange: ExchangeName;
+  ok: boolean;
+  message: string;
+}
+
+export interface TradeCredentialVerificationResponse {
+  ok: boolean;
+  checked_at: string;
+  results: TradeCredentialVerificationResult[];
+}
+
 export interface TradeEvent {
   at: string;
   phase: string;

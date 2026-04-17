@@ -1,5 +1,5 @@
 import { jsPDF } from "jspdf";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useExecutionPlan } from "../hooks/useExecutionPlan";
 import { useNow } from "../hooks/useNow";
 import { useSymbolComparison } from "../hooks/useSymbolComparison";
@@ -17,14 +17,25 @@ import {
   getNextFundingTime,
 } from "../lib/monitor";
 import type { ExchangeName } from "../lib/types";
-import type { TradeCredentialInput, TradeLegExecution, TradeSessionResponse } from "../lib/trade-types";
+import type {
+  TradeCredentialInput,
+  TradeCredentialVerificationResponse,
+  TradeLegExecution,
+  TradeSessionResponse,
+} from "../lib/trade-types";
 
 const TRADE_CREDENTIALS_KEY = "arbradar-trade-credentials";
 const PAPER_GUIDE_KEY = "arbradar-paper-guide-seen";
 const DEFAULT_COINSWITCH_EXCHANGE = "EXCHANGE_2";
 const CANCEL_LOCK_WINDOW_MINUTES = 10;
+const API_BASE = import.meta.env.VITE_API_URL ?? "/api";
 
 type TradeCredentialState = Record<string, { api_key: string; api_secret: string; extra?: Record<string, string> }>;
+type VerificationState =
+  | { status: "idle"; message: null; checkedAt: null; results: null }
+  | { status: "checking"; message: string; checkedAt: null; results: null }
+  | { status: "success"; message: string; checkedAt: string; results: TradeCredentialVerificationResponse["results"] }
+  | { status: "error"; message: string; checkedAt: string | null; results: TradeCredentialVerificationResponse["results"] | null };
 
 function buildSupportNote(exchange: ExchangeName) {
   switch (exchange) {
@@ -415,6 +426,7 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
   const [isPaperGuideOpen, setIsPaperGuideOpen] = useState(() => !readPaperGuideSeen());
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
   const [credentialFileNotice, setCredentialFileNotice] = useState<string | null>(null);
+  const [verification, setVerification] = useState<VerificationState>({ status: "idle", message: null, checkedAt: null, results: null });
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const nowTimestamp = useNow(1000);
   const selectedExchanges = useMemo(() => {
@@ -550,6 +562,19 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
         ),
     [credentialInputs],
   );
+  const liveReadyForVerification = requiredExchanges.length > 0 && liveCredentialPayload.length === requiredExchanges.length;
+  const liveVerificationPassed = useMemo(() => {
+    if (verification.status !== "success") {
+      return false;
+    }
+    return requiredExchanges.every((exchange) => verification.results.some((result) => result.exchange === exchange && result.ok));
+  }, [requiredExchanges, verification]);
+  const liveArmBlockedReason = !paperTradingEnabled && !liveVerificationPassed ? "Verify both exchange APIs before arming a live trade." : null;
+
+  useEffect(() => {
+    setVerification({ status: "idle", message: null, checkedAt: null, results: null });
+  }, [paperTradingEnabled, requiredExchanges.join(","), JSON.stringify(liveCredentialPayload)]);
+
   const localTradeHistory = useMemo(
     () => history.filter((item) => item.canonical_symbol.toUpperCase() === canonicalSymbol.toUpperCase()),
     [canonicalSymbol, history],
@@ -573,6 +598,15 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
 
   const armTrade = async () => {
     if (!activeOpportunity) return;
+    if (!paperTradingEnabled && !liveVerificationPassed) {
+      setVerification({
+        status: "error",
+        message: "Verify both exchange APIs first, then arm the live trade.",
+        checkedAt: verification.checkedAt,
+        results: verification.results,
+      });
+      return;
+    }
     await createSession({
       canonical_symbol: activeOpportunity.canonical_symbol,
       selected_exchanges: selectedExchanges as ExchangeName[],
@@ -586,6 +620,60 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
       schedule: { entry_seconds_before_funding: entryLeadSeconds, exit_seconds_after_funding: exitLagSeconds },
       credentials: mode === "live" ? liveCredentialPayload : [],
     });
+  };
+
+  const verifyLiveCredentials = async () => {
+    if (paperTradingEnabled) {
+      return;
+    }
+    if (!liveReadyForVerification) {
+      setVerification({
+        status: "error",
+        message: "Enter API key/secret for both exchanges before verification.",
+        checkedAt: null,
+        results: null,
+      });
+      return;
+    }
+
+    setVerification({ status: "checking", message: "Verifying exchange APIs...", checkedAt: null, results: null });
+    try {
+      const response = await fetch(`${API_BASE}/trade/verify-credentials`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          required_exchanges: requiredExchanges,
+          credentials: liveCredentialPayload,
+        }),
+      });
+      const payload = (await response.json()) as TradeCredentialVerificationResponse | { detail?: string };
+      if (!response.ok) {
+        throw new Error((payload as { detail?: string }).detail ?? "Credential verification failed.");
+      }
+      const verificationPayload = payload as TradeCredentialVerificationResponse;
+      if (verificationPayload.ok) {
+        setVerification({
+          status: "success",
+          message: "All required exchange APIs verified. Live arming is now enabled.",
+          checkedAt: verificationPayload.checked_at,
+          results: verificationPayload.results,
+        });
+      } else {
+        setVerification({
+          status: "error",
+          message: "One or more exchange APIs failed verification. Fix them and verify again.",
+          checkedAt: verificationPayload.checked_at,
+          results: verificationPayload.results,
+        });
+      }
+    } catch (verificationError) {
+      setVerification({
+        status: "error",
+        message: verificationError instanceof Error ? verificationError.message : "Credential verification failed.",
+        checkedAt: null,
+        results: null,
+      });
+    }
   };
 
   const setLeverageOverrideValue = (exchange: ExchangeName, value: string) => {

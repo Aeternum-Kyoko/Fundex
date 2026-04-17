@@ -20,6 +20,9 @@ from app.models.market import ArbitrageOpportunity, ExchangeName, FundingSnapsho
 from app.models.trade import (
     TradeCreateRequest,
     TradeCredentialInput,
+    TradeCredentialVerificationRequest,
+    TradeCredentialVerificationResponse,
+    TradeCredentialVerificationResult,
     TradeEvent,
     TradeLegExecution,
     TradeMode,
@@ -261,6 +264,62 @@ class TradeManager:
 
         return response
 
+    async def verify_credentials(self, request: TradeCredentialVerificationRequest) -> TradeCredentialVerificationResponse:
+        required = list(dict.fromkeys(request.required_exchanges))
+        if not required:
+            raise HTTPException(status_code=400, detail="required_exchanges cannot be empty.")
+
+        credentials = self._resolve_credentials(request.credentials)
+        results: list[TradeCredentialVerificationResult] = []
+        checked_at = _utcnow()
+
+        for exchange in required:
+            supported, support_note = _support_for_exchange(exchange)
+            if not supported:
+                results.append(
+                    TradeCredentialVerificationResult(
+                        exchange=exchange,
+                        ok=False,
+                        message=support_note or "Live trading is not supported for this exchange.",
+                    )
+                )
+                continue
+
+            credential = credentials.get(exchange)
+            if credential is None or not credential.api_key.strip() or not credential.api_secret.strip():
+                results.append(
+                    TradeCredentialVerificationResult(
+                        exchange=exchange,
+                        ok=False,
+                        message="Missing API key/secret for this exchange.",
+                    )
+                )
+                continue
+
+            try:
+                await self._verify_exchange_credentials(exchange, credential)
+                results.append(
+                    TradeCredentialVerificationResult(
+                        exchange=exchange,
+                        ok=True,
+                        message="API credentials verified successfully.",
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001
+                results.append(
+                    TradeCredentialVerificationResult(
+                        exchange=exchange,
+                        ok=False,
+                        message=self._format_verify_error(exchange, exc),
+                    )
+                )
+
+        return TradeCredentialVerificationResponse(
+            ok=all(result.ok for result in results),
+            checked_at=checked_at,
+            results=results,
+        )
+
     async def get_session(self, session_id: str) -> TradeSessionResponse:
         async with self._lock:
             record = self._sessions.get(session_id)
@@ -470,6 +529,73 @@ class TradeManager:
                 is_exit=True,
             )
             await self._append_event(record.response.id, "recovery", f"Emergency close was submitted for the {leg_name} leg.", level="warning")
+
+    async def _verify_exchange_credentials(self, exchange: ExchangeName, credential: _TradeCredentialSecret) -> None:
+        if exchange == "binance":
+            await self._verify_binance_credentials(credential)
+            return
+        if exchange == "coindcx":
+            await self._verify_coindcx_credentials(credential)
+            return
+        if exchange == "coinswitch":
+            await self._verify_coinswitch_credentials(credential)
+            return
+        raise RuntimeError(f"Credential verification is unavailable for {exchange}.")
+
+    async def _verify_binance_credentials(self, credential: _TradeCredentialSecret) -> None:
+        params = {
+            "recvWindow": 5_000,
+            "timestamp": int(_utcnow().timestamp() * 1000),
+        }
+        await self._binance_signed_request("GET", "/fapi/v2/account", credential, params=params)
+
+    async def _verify_coindcx_credentials(self, credential: _TradeCredentialSecret) -> None:
+        payload = {"timestamp": int(_utcnow().timestamp() * 1000)}
+        await self._coindcx_post(credential, "/exchange/v1/users/info", payload)
+
+    async def _verify_coinswitch_credentials(self, credential: _TradeCredentialSecret) -> None:
+        epoch_time = await self._coinswitch_server_epoch()
+        params = {"exchange": credential.extra.get("exchange", "EXCHANGE_2")}
+        endpoint = "/trade/api/v2/futures/instrument_info"
+        request_path = endpoint
+        if params:
+            request_path += "?" + urlencode(params)
+
+        signature = self._coinswitch_sign_get_request(request_path, str(epoch_time), credential.api_secret)
+        response = await self.client.get(
+            f"https://coinswitch.co{request_path}",
+            headers={
+                "Content-Type": "application/json",
+                "X-AUTH-SIGNATURE": signature,
+                "X-AUTH-APIKEY": credential.api_key,
+                "X-AUTH-EPOCH": str(epoch_time),
+                "User-Agent": "ArbRadar/1.0",
+            },
+        )
+        response.raise_for_status()
+
+    async def _coinswitch_server_epoch(self) -> int:
+        response = await self.client.get("https://coinswitch.co/trade/api/v2/time")
+        response.raise_for_status()
+        payload = response.json()
+        return int(payload.get("serverTime") or int(_utcnow().timestamp() * 1000))
+
+    @staticmethod
+    def _coinswitch_sign_get_request(request_path: str, epoch_time: str, secret_hex: str) -> str:
+        request_string = f"GET{request_path}{epoch_time}".encode("utf-8")
+        private_key = ed25519.Ed25519PrivateKey.from_private_bytes(bytes.fromhex(secret_hex))
+        return private_key.sign(request_string).hex()
+
+    @staticmethod
+    def _format_verify_error(exchange: ExchangeName, exc: Exception) -> str:
+        if isinstance(exc, httpx.HTTPStatusError):
+            status = exc.response.status_code
+            body = exc.response.text.strip()
+            trimmed_body = body[:180] + ("..." if len(body) > 180 else "")
+            if trimmed_body:
+                return f"{exchange} verification failed with HTTP {status}: {trimmed_body}"
+            return f"{exchange} verification failed with HTTP {status}."
+        return f"{exchange} verification failed: {str(exc)}"
 
     async def _submit_live_order(
         self,

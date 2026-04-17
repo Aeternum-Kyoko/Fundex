@@ -18,7 +18,12 @@ from app.models.market import (
     SymbolComparisonExchangeSnapshot,
     SymbolComparisonResponse,
 )
-from app.models.trade import TradeCreateRequest, TradeSessionResponse
+from app.models.trade import (
+    TradeCreateRequest,
+    TradeCredentialVerificationRequest,
+    TradeCredentialVerificationResponse,
+    TradeSessionResponse,
+)
 from app.services.arbitrage import build_opportunities
 from app.services.execution import build_execution_plan, reverse_opportunity
 from app.services.funding_leaders import build_funding_leaders
@@ -340,6 +345,14 @@ async def execution_plan(
 @router.post("/trade/sessions", response_model=TradeSessionResponse)
 async def create_trade_session(request: Request, payload: TradeCreateRequest) -> TradeSessionResponse:
     return await request.app.state.trade_manager.create_session(payload)
+
+
+@router.post("/trade/verify-credentials", response_model=TradeCredentialVerificationResponse)
+async def verify_trade_credentials(
+    request: Request,
+    payload: TradeCredentialVerificationRequest,
+) -> TradeCredentialVerificationResponse:
+    return await request.app.state.trade_manager.verify_credentials(payload)
 
 
 @router.get("/trade/sessions/{session_id}", response_model=TradeSessionResponse)
