@@ -640,7 +640,7 @@ class TradeManager:
     async def _fetch_coinswitch_wallet_balance(self, credential: _TradeCredentialSecret) -> tuple[float | None, str | None]:
         epoch_time = await self._coinswitch_server_epoch()
         params = {"exchange": credential.extra.get("exchange", "EXCHANGE_2")}
-        endpoint = "/trade/api/v2/futures/wallet"
+        endpoint = "/trade/api/v2/futures/wallet_balance"
         request_path = endpoint
         if params:
             request_path += "?" + urlencode(params)
