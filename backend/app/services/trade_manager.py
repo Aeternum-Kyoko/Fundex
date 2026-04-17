@@ -5,6 +5,7 @@ import contextlib
 import hashlib
 import hmac
 import json
+import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -67,7 +68,7 @@ def _support_for_exchange(exchange: ExchangeName) -> tuple[bool, str | None]:
     if exchange == "coinswitch":
         return True, "CoinSwitch standard futures API supports live market orders, but leverage must already be configured on the venue."
     if exchange == "delta":
-        return False, "Delta live automation is not enabled in this phase because contract-size validation still needs a dedicated product map."
+        return True, "Delta Exchange India live mode is enabled with market orders. Contract size is normalized to the nearest supported integer quantity."
     return False, "Live support is unavailable for this exchange in the current phase."
 
 
@@ -97,6 +98,8 @@ class TradeManager:
         self.client = httpx.AsyncClient(timeout=30.0, headers={"User-Agent": "ArbRadar/1.0"})
         self._sessions: dict[str, _TradeSessionRecord] = {}
         self._lock = asyncio.Lock()
+        self._delta_products_by_symbol: dict[str, int] = {}
+        self._delta_products_updated_at: datetime | None = None
 
     async def stop(self) -> None:
         async with self._lock:
@@ -298,11 +301,14 @@ class TradeManager:
 
             try:
                 await self._verify_exchange_credentials(exchange, credential)
+                wallet_balance_usd, wallet_balance_note = await self._fetch_wallet_balance(exchange, credential)
                 results.append(
                     TradeCredentialVerificationResult(
                         exchange=exchange,
                         ok=True,
                         message="API credentials verified successfully.",
+                        wallet_balance_usd=wallet_balance_usd,
+                        wallet_balance_note=wallet_balance_note,
                     )
                 )
             except Exception as exc:  # noqa: BLE001
@@ -540,7 +546,24 @@ class TradeManager:
         if exchange == "coinswitch":
             await self._verify_coinswitch_credentials(credential)
             return
+        if exchange == "delta":
+            await self._verify_delta_credentials(credential)
+            return
         raise RuntimeError(f"Credential verification is unavailable for {exchange}.")
+
+    async def _fetch_wallet_balance(self, exchange: ExchangeName, credential: _TradeCredentialSecret) -> tuple[float | None, str | None]:
+        try:
+            if exchange == "binance":
+                return await self._fetch_binance_wallet_balance(credential), None
+            if exchange == "coindcx":
+                return await self._fetch_coindcx_wallet_balance(credential), None
+            if exchange == "coinswitch":
+                return await self._fetch_coinswitch_wallet_balance(credential)
+            if exchange == "delta":
+                return await self._fetch_delta_wallet_balance(credential), None
+            return None, "Wallet balance fetch is not available for this exchange."
+        except Exception as exc:  # noqa: BLE001
+            return None, f"Wallet balance fetch failed: {str(exc)}"
 
     async def _verify_binance_credentials(self, credential: _TradeCredentialSecret) -> None:
         params = {
@@ -573,6 +596,108 @@ class TradeManager:
             },
         )
         response.raise_for_status()
+
+    async def _verify_delta_credentials(self, credential: _TradeCredentialSecret) -> None:
+        await self._delta_signed_request("GET", "/v2/wallet/balances", credential)
+
+    async def _fetch_binance_wallet_balance(self, credential: _TradeCredentialSecret) -> float | None:
+        params = {
+            "recvWindow": 5_000,
+            "timestamp": int(_utcnow().timestamp() * 1000),
+        }
+        payload = await self._binance_signed_request("GET", "/fapi/v2/balance", credential, params=params)
+        if not isinstance(payload, list):
+            return None
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("asset", "")).upper() != "USDT":
+                continue
+            for key in ("availableBalance", "crossWalletBalance", "balance"):
+                value = item.get(key)
+                if value in (None, ""):
+                    continue
+                return float(value)
+        return None
+
+    async def _fetch_coindcx_wallet_balance(self, credential: _TradeCredentialSecret) -> float | None:
+        payload = {"timestamp": int(_utcnow().timestamp() * 1000)}
+        response = await self._coindcx_post(credential, "/exchange/v1/users/balances", payload)
+        if not isinstance(response, list):
+            return None
+        for item in response:
+            if not isinstance(item, dict):
+                continue
+            currency = str(item.get("currency", "")).upper()
+            if currency not in {"USDT", "USDTFUT"}:
+                continue
+            value = item.get("balance") or item.get("available_balance")
+            if value in (None, ""):
+                continue
+            return float(value)
+        return None
+
+    async def _fetch_coinswitch_wallet_balance(self, credential: _TradeCredentialSecret) -> tuple[float | None, str | None]:
+        epoch_time = await self._coinswitch_server_epoch()
+        params = {"exchange": credential.extra.get("exchange", "EXCHANGE_2")}
+        endpoint = "/trade/api/v2/futures/wallet"
+        request_path = endpoint
+        if params:
+            request_path += "?" + urlencode(params)
+        signature = self._coinswitch_sign_get_request(request_path, str(epoch_time), credential.api_secret)
+        response = await self.client.get(
+            f"https://coinswitch.co{request_path}",
+            headers={
+                "Content-Type": "application/json",
+                "X-AUTH-SIGNATURE": signature,
+                "X-AUTH-APIKEY": credential.api_key,
+                "X-AUTH-EPOCH": str(epoch_time),
+                "User-Agent": "ArbRadar/1.0",
+            },
+        )
+        if response.status_code >= 400:
+            return None, f"Wallet endpoint returned HTTP {response.status_code}."
+        payload = response.json()
+        data = payload.get("data")
+        if isinstance(data, dict):
+            for key in ("available_balance", "balance", "wallet_balance", "equity"):
+                value = data.get(key)
+                if value in (None, ""):
+                    continue
+                return float(value), None
+        return None, "Wallet balance not returned by exchange response."
+
+    async def _fetch_delta_wallet_balance(self, credential: _TradeCredentialSecret) -> float | None:
+        payload = await self._delta_signed_request("GET", "/v2/wallet/balances", credential)
+        rows = payload.get("result")
+        if not isinstance(rows, list):
+            return None
+
+        selected_value: float | None = None
+        for preferred_currency in ("USDT", "INR"):
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                symbol = str(row.get("asset_symbol") or row.get("asset") or "").upper()
+                if symbol != preferred_currency:
+                    continue
+                for key in ("available_balance", "balance", "wallet_balance"):
+                    value = row.get(key)
+                    if value in (None, ""):
+                        continue
+                    return float(value)
+
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            for key in ("available_balance", "balance", "wallet_balance"):
+                value = row.get(key)
+                if value in (None, ""):
+                    continue
+                parsed = float(value)
+                if selected_value is None:
+                    selected_value = parsed
+        return selected_value
 
     async def _coinswitch_server_epoch(self) -> int:
         response = await self.client.get("https://coinswitch.co/trade/api/v2/time")
@@ -616,6 +741,10 @@ class TradeManager:
             return await self._coindcx_order(credential, snapshot.exchange_symbol, leg, leverage, is_exit)
         if snapshot.exchange == "coinswitch":
             return await self._coinswitch_order(credential, snapshot.exchange_symbol, leg, is_exit)
+        if snapshot.exchange == "delta":
+            if not is_exit:
+                await self._delta_set_leverage(credential, snapshot.exchange_symbol, leverage)
+            return await self._delta_order(credential, snapshot.exchange_symbol, leg, is_exit)
         raise RuntimeError(f"Live trading is not supported for {snapshot.exchange} in this phase.")
 
     async def _binance_set_leverage(self, credential: _TradeCredentialSecret, symbol: str, leverage: float) -> None:
@@ -748,6 +877,100 @@ class TradeManager:
                 "X-AUTH-APIKEY": credential.api_key,
             },
             content=_compact_json(payload),
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def _delta_set_leverage(self, credential: _TradeCredentialSecret, symbol: str, leverage: float) -> None:
+        product_id = await self._delta_product_id(symbol)
+        await self._delta_signed_request(
+            "POST",
+            f"/v2/products/{product_id}/orders/leverage",
+            credential,
+            payload={"leverage": int(round(leverage))},
+        )
+
+    async def _delta_order(
+        self,
+        credential: _TradeCredentialSecret,
+        symbol: str,
+        leg: ExecutionLegPlan,
+        is_exit: bool,
+    ) -> dict[str, Any]:
+        product_id = await self._delta_product_id(symbol)
+        side = ("sell" if leg.side == "buy" else "buy") if is_exit else leg.side
+        payload = {
+            "product_id": product_id,
+            "order_type": "market_order",
+            "size": max(1, int(round(leg.estimated_quantity))),
+            "side": side,
+        }
+        if is_exit:
+            payload["reduce_only"] = True
+        return await self._delta_signed_request("POST", "/v2/orders", credential, payload=payload)
+
+    async def _delta_product_id(self, symbol: str) -> int:
+        await self._refresh_delta_products_if_needed()
+        product_id = self._delta_products_by_symbol.get(symbol)
+        if product_id is not None:
+            return product_id
+        raise RuntimeError(f"Delta product id not found for symbol {symbol}.")
+
+    async def _refresh_delta_products_if_needed(self) -> None:
+        now = _utcnow()
+        if self._delta_products_updated_at and now - self._delta_products_updated_at < timedelta(hours=6):
+            return
+        response = await self.client.get(
+            "https://api.india.delta.exchange/v2/products",
+            params={"contract_types": "perpetual_futures", "states": "live", "page_size": 500},
+        )
+        response.raise_for_status()
+        payload = response.json()
+        products: dict[str, int] = {}
+        for item in payload.get("result", []):
+            if not isinstance(item, dict):
+                continue
+            symbol = item.get("symbol")
+            product_id = item.get("id")
+            if not symbol or product_id in (None, ""):
+                continue
+            products[str(symbol)] = int(product_id)
+        self._delta_products_by_symbol = products
+        self._delta_products_updated_at = now
+
+    async def _delta_signed_request(
+        self,
+        method: str,
+        path: str,
+        credential: _TradeCredentialSecret,
+        *,
+        query_params: dict[str, Any] | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        timestamp = str(int(time.time()))
+        query_string = urlencode(query_params or {})
+        query_suffix = f"?{query_string}" if query_string else ""
+        body = _compact_json(payload) if payload is not None else ""
+        signature_data = f"{method.upper()}{timestamp}{path}{query_suffix}{body}"
+        signature = hmac.new(
+            credential.api_secret.encode("utf-8"),
+            signature_data.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        headers = {
+            "Accept": "application/json",
+            "api-key": credential.api_key,
+            "signature": signature,
+            "timestamp": timestamp,
+        }
+        if payload is not None:
+            headers["Content-Type"] = "application/json"
+        response = await self.client.request(
+            method.upper(),
+            f"https://api.india.delta.exchange{path}",
+            params=query_params,
+            headers=headers,
+            content=body if payload is not None else None,
         )
         response.raise_for_status()
         return response.json()

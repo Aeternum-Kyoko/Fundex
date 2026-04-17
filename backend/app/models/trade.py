@@ -49,6 +49,8 @@ class TradeCredentialVerificationResult(BaseModel):
     exchange: ExchangeName
     ok: bool
     message: str
+    wallet_balance_usd: float | None = None
+    wallet_balance_note: str | None = None
 
 
 class TradeCredentialVerificationResponse(BaseModel):

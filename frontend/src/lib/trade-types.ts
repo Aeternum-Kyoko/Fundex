@@ -35,6 +35,8 @@ export interface TradeCredentialVerificationResult {
   exchange: ExchangeName;
   ok: boolean;
   message: string;
+  wallet_balance_usd?: number | null;
+  wallet_balance_note?: string | null;
 }
 
 export interface TradeCredentialVerificationResponse {

@@ -46,7 +46,7 @@ function buildSupportNote(exchange: ExchangeName) {
     case "coinswitch":
       return { live: true, note: "CoinSwitch leverage must already be configured on the venue." };
     case "delta":
-      return { live: false, note: "Delta stays paper-only in this phase while contract sizing is tightened." };
+      return { live: true, note: "Delta live mode is supported with market orders and integer contract sizing." };
     default:
       return { live: false, note: "Live support unavailable." };
   }
@@ -569,7 +569,13 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
     }
     return requiredExchanges.every((exchange) => verification.results.some((result) => result.exchange === exchange && result.ok));
   }, [requiredExchanges, verification]);
-  const liveArmBlockedReason = !paperTradingEnabled && !liveVerificationPassed ? "Verify both exchange APIs before arming a live trade." : null;
+  const liveArmBlockedReason = !paperTradingEnabled
+    ? (!liveModeAvailable
+      ? "Live mode is unavailable for one of the selected exchanges."
+      : !liveVerificationPassed
+        ? "Verify both exchange APIs before arming a live trade."
+        : null)
+    : null;
 
   useEffect(() => {
     setVerification({ status: "idle", message: null, checkedAt: null, results: null });
@@ -868,6 +874,16 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
           <label className="toggle-row"><input type="checkbox" checked={rememberCredentials} onChange={(event) => { setRememberCredentials(event.target.checked); persistCredentials(event.target.checked, credentials); setCredentialFileNotice(event.target.checked ? "Live credentials will be kept on this device until you switch this off." : "Stored device credentials were cleared from local storage."); }} /><span>Remember on this device</span></label>
           <button type="button" className="action-button secondary-button" onClick={exportKeysFile}>Export keys file</button>
           <button type="button" className="action-button secondary-button" onClick={() => fileInputRef.current?.click()}>Import keys file</button>
+          {!paperTradingEnabled ? (
+            <button
+              type="button"
+              className="action-button secondary-button"
+              onClick={() => void verifyLiveCredentials()}
+              disabled={verification.status === "checking" || !liveReadyForVerification}
+            >
+              {verification.status === "checking" ? "Verifying..." : "Verify APIs"}
+            </button>
+          ) : null}
           <input ref={fileInputRef} type="file" accept="application/json" hidden onChange={(event) => {
             const file = event.target.files?.[0];
             if (file) {
@@ -876,6 +892,36 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
             event.currentTarget.value = "";
           }} />
         </div>
+        {!paperTradingEnabled && verification.status !== "idle" ? (
+          <article className="overview-card">
+            <div className="overview-card-header">
+              <div>
+                <p className="eyebrow">Verification</p>
+                <strong>{verification.message}</strong>
+              </div>
+              <span className={`quality-badge quality-${verification.status === "success" ? "positive" : verification.status === "error" ? "danger" : "neutral"}`}>
+                {verification.status}
+              </span>
+            </div>
+            {verification.results ? (
+              <div className="detail-grid compare-detail-grid">
+                {verification.results.map((result) => (
+                  <div key={`verify-${result.exchange}`}>
+                    <span className="subtle">
+                      {exchangeLabel(result.exchange)} {result.ok ? "verified" : "failed"}
+                    </span>
+                    <strong>
+                      {result.wallet_balance_usd != null
+                        ? `Wallet: ${formatUsd(result.wallet_balance_usd)}`
+                        : result.wallet_balance_note ?? result.message}
+                    </strong>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {verification.checkedAt ? <p className="subtle">Checked at {formatTimestamp(verification.checkedAt)}</p> : null}
+          </article>
+        ) : null}
 
         <div className="trade-credentials-grid">
           {credentialInputs.map((item) => (
@@ -931,10 +977,16 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
           </div>
 
           <div className="button-row">
-            <button type="button" className="action-button" onClick={() => void armTrade()} disabled={sessionLoading || !activePlan || (!paperTradingEnabled && !liveModeAvailable)}>
+            <button
+              type="button"
+              className="action-button"
+              onClick={() => void armTrade()}
+              disabled={sessionLoading || !activePlan || (!paperTradingEnabled && (!liveModeAvailable || !liveVerificationPassed))}
+            >
               {paperTradingEnabled ? "Arm paper trade" : "Arm live trade"}
             </button>
           </div>
+          {liveArmBlockedReason ? <p className="subtle trade-inline-note">{liveArmBlockedReason}</p> : null}
         </section>
       ) : null}
 
