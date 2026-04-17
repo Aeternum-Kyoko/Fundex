@@ -300,14 +300,20 @@ class TradeManager:
                 continue
 
             try:
-                await self._verify_exchange_credentials(exchange, credential)
-                wallet_balance_usd, wallet_balance_note = await self._fetch_wallet_balance(exchange, credential)
+                permission_level, permission_note = await self._verify_exchange_credentials(exchange, credential)
+                wallet_available_usd, wallet_total_usd, wallet_balance_note = await self._fetch_wallet_balance(exchange, credential)
+                if exchange in {"coinswitch", "delta"} and wallet_balance_note is None:
+                    permission_level = "trading"
+                    permission_note = "Trading access confirmed via private wallet endpoint."
                 results.append(
                     TradeCredentialVerificationResult(
                         exchange=exchange,
                         ok=True,
                         message="API credentials verified successfully.",
-                        wallet_balance_usd=wallet_balance_usd,
+                        permission_level=permission_level,
+                        permission_note=permission_note,
+                        wallet_balance_usd=wallet_available_usd,
+                        wallet_total_usd=wallet_total_usd,
                         wallet_balance_note=wallet_balance_note,
                     )
                 )
@@ -317,6 +323,7 @@ class TradeManager:
                         exchange=exchange,
                         ok=False,
                         message=self._format_verify_error(exchange, exc),
+                        permission_level="unknown",
                     )
                 )
 
@@ -536,47 +543,55 @@ class TradeManager:
             )
             await self._append_event(record.response.id, "recovery", f"Emergency close was submitted for the {leg_name} leg.", level="warning")
 
-    async def _verify_exchange_credentials(self, exchange: ExchangeName, credential: _TradeCredentialSecret) -> None:
+    async def _verify_exchange_credentials(self, exchange: ExchangeName, credential: _TradeCredentialSecret) -> tuple[str, str | None]:
         if exchange == "binance":
-            await self._verify_binance_credentials(credential)
-            return
+            return await self._verify_binance_credentials(credential)
         if exchange == "coindcx":
-            await self._verify_coindcx_credentials(credential)
-            return
+            return await self._verify_coindcx_credentials(credential)
         if exchange == "coinswitch":
-            await self._verify_coinswitch_credentials(credential)
-            return
+            return await self._verify_coinswitch_credentials(credential)
         if exchange == "delta":
-            await self._verify_delta_credentials(credential)
-            return
+            return await self._verify_delta_credentials(credential)
         raise RuntimeError(f"Credential verification is unavailable for {exchange}.")
 
-    async def _fetch_wallet_balance(self, exchange: ExchangeName, credential: _TradeCredentialSecret) -> tuple[float | None, str | None]:
+    async def _fetch_wallet_balance(self, exchange: ExchangeName, credential: _TradeCredentialSecret) -> tuple[float | None, float | None, str | None]:
         try:
             if exchange == "binance":
-                return await self._fetch_binance_wallet_balance(credential), None
+                available, total = await self._fetch_binance_wallet_balance(credential)
+                return available, total, None
             if exchange == "coindcx":
-                return await self._fetch_coindcx_wallet_balance(credential), None
+                available, total = await self._fetch_coindcx_wallet_balance(credential)
+                return available, total, None
             if exchange == "coinswitch":
                 return await self._fetch_coinswitch_wallet_balance(credential)
             if exchange == "delta":
-                return await self._fetch_delta_wallet_balance(credential), None
-            return None, "Wallet balance fetch is not available for this exchange."
+                available, total = await self._fetch_delta_wallet_balance(credential)
+                return available, total, None
+            return None, None, "Wallet balance fetch is not available for this exchange."
         except Exception as exc:  # noqa: BLE001
-            return None, f"Wallet balance fetch failed: {str(exc)}"
+            return None, None, f"Wallet balance fetch failed: {str(exc)}"
 
-    async def _verify_binance_credentials(self, credential: _TradeCredentialSecret) -> None:
+    async def _verify_binance_credentials(self, credential: _TradeCredentialSecret) -> tuple[str, str | None]:
         params = {
             "recvWindow": 5_000,
             "timestamp": int(_utcnow().timestamp() * 1000),
         }
-        await self._binance_signed_request("GET", "/fapi/v2/account", credential, params=params)
+        payload = await self._binance_signed_request("GET", "/fapi/v2/account", credential, params=params)
+        can_trade = bool(payload.get("canTrade"))
+        if can_trade:
+            return "trading", "Trading enabled on Binance futures API key."
+        return "read_only", "Authenticated, but Binance reports trading is disabled on this API key."
 
-    async def _verify_coindcx_credentials(self, credential: _TradeCredentialSecret) -> None:
+    async def _verify_coindcx_credentials(self, credential: _TradeCredentialSecret) -> tuple[str, str | None]:
         payload = {"timestamp": int(_utcnow().timestamp() * 1000)}
-        await self._coindcx_post(credential, "/exchange/v1/users/info", payload)
+        response = await self._coindcx_post(credential, "/exchange/v1/users/info", payload)
+        if isinstance(response, dict):
+            can_trade = response.get("can_trade") or response.get("is_user_allowed_to_trade") or response.get("trade_enabled")
+            if isinstance(can_trade, bool):
+                return ("trading", "Trading enabled on CoinDCX API key.") if can_trade else ("read_only", "CoinDCX key is authenticated but trading appears disabled.")
+        return "unknown", "Authenticated on CoinDCX. Trading permission could not be determined explicitly."
 
-    async def _verify_coinswitch_credentials(self, credential: _TradeCredentialSecret) -> None:
+    async def _verify_coinswitch_credentials(self, credential: _TradeCredentialSecret) -> tuple[str, str | None]:
         epoch_time = await self._coinswitch_server_epoch()
         params = {"exchange": credential.extra.get("exchange", "EXCHANGE_2")}
         endpoint = "/trade/api/v2/futures/instrument_info"
@@ -596,11 +611,13 @@ class TradeManager:
             },
         )
         response.raise_for_status()
+        return "unknown", "Authenticated on CoinSwitch. Trading permission is inferred via wallet/trade endpoints."
 
-    async def _verify_delta_credentials(self, credential: _TradeCredentialSecret) -> None:
+    async def _verify_delta_credentials(self, credential: _TradeCredentialSecret) -> tuple[str, str | None]:
         await self._delta_signed_request("GET", "/v2/wallet/balances", credential)
+        return "trading", "Trading-level private wallet access verified on Delta."
 
-    async def _fetch_binance_wallet_balance(self, credential: _TradeCredentialSecret) -> float | None:
+    async def _fetch_binance_wallet_balance(self, credential: _TradeCredentialSecret) -> tuple[float | None, float | None]:
         params = {
             "recvWindow": 5_000,
             "timestamp": int(_utcnow().timestamp() * 1000),
@@ -617,10 +634,13 @@ class TradeManager:
                 value = item.get(key)
                 if value in (None, ""):
                     continue
-                return float(value)
-        return None
+                available = float(value)
+                total_raw = item.get("balance")
+                total = float(total_raw) if total_raw not in (None, "") else available
+                return available, total
+        return None, None
 
-    async def _fetch_coindcx_wallet_balance(self, credential: _TradeCredentialSecret) -> float | None:
+    async def _fetch_coindcx_wallet_balance(self, credential: _TradeCredentialSecret) -> tuple[float | None, float | None]:
         payload = {"timestamp": int(_utcnow().timestamp() * 1000)}
         response = await self._coindcx_post(credential, "/exchange/v1/users/balances", payload)
         if not isinstance(response, list):
@@ -634,16 +654,15 @@ class TradeManager:
             value = item.get("balance") or item.get("available_balance")
             if value in (None, ""):
                 continue
-            return float(value)
-        return None
+            total = float(item.get("balance")) if item.get("balance") not in (None, "") else None
+            available = float(item.get("available_balance")) if item.get("available_balance") not in (None, "") else total
+            return available, total
+        return None, None
 
-    async def _fetch_coinswitch_wallet_balance(self, credential: _TradeCredentialSecret) -> tuple[float | None, str | None]:
+    async def _fetch_coinswitch_wallet_balance(self, credential: _TradeCredentialSecret) -> tuple[float | None, float | None, str | None]:
         epoch_time = await self._coinswitch_server_epoch()
-        params = {"exchange": credential.extra.get("exchange", "EXCHANGE_2")}
         endpoint = "/trade/api/v2/futures/wallet_balance"
         request_path = endpoint
-        if params:
-            request_path += "?" + urlencode(params)
         signature = self._coinswitch_sign_get_request(request_path, str(epoch_time), credential.api_secret)
         response = await self.client.get(
             f"https://coinswitch.co{request_path}",
@@ -656,22 +675,91 @@ class TradeManager:
             },
         )
         if response.status_code >= 400:
-            return None, f"Wallet endpoint returned HTTP {response.status_code}."
+            return None, None, f"Wallet endpoint returned HTTP {response.status_code}."
         payload = response.json()
         data = payload.get("data")
         if isinstance(data, dict):
+            # Common top-level wallet keys.
+            for key in ("available_balance", "available_margin", "free_balance"):
+                value = data.get(key)
+                if value not in (None, ""):
+                    available = float(value)
+                    total_raw = data.get("total_balance") or data.get("wallet_balance") or data.get("balance") or value
+                    total = float(total_raw) if total_raw not in (None, "") else available
+                    return available, total, None
+            # Nested wallets map/list patterns.
+            nested_wallet = data.get("wallet") or data.get("wallet_balance") or data.get("balances") or data.get("result")
+            if isinstance(nested_wallet, dict):
+                usdt_bucket = nested_wallet.get("USDT") or nested_wallet.get("usdt")
+                if isinstance(usdt_bucket, dict):
+                    available_raw = usdt_bucket.get("available_balance") or usdt_bucket.get("free") or usdt_bucket.get("available")
+                    total_raw = usdt_bucket.get("total_balance") or usdt_bucket.get("balance") or usdt_bucket.get("wallet_balance")
+                    available = float(available_raw) if available_raw not in (None, "") else None
+                    total = float(total_raw) if total_raw not in (None, "") else available
+                    if available is not None or total is not None:
+                        return available, total, None
             for key in ("available_balance", "balance", "wallet_balance", "equity"):
                 value = data.get(key)
                 if value in (None, ""):
                     continue
-                return float(value), None
-        return None, "Wallet balance not returned by exchange response."
+                parsed = float(value)
+                return parsed, parsed, None
+        if isinstance(data, list):
+            totals: list[float] = []
+            candidate_available: list[float] = []
+            for row in data:
+                if not isinstance(row, dict):
+                    continue
+                base_asset = str(row.get("base_asset", "")).upper()
+                if base_asset != "USDT":
+                    continue
+                available_row = row.get("available_balance") or row.get("free_balance")
+                if available_row not in (None, ""):
+                    candidate_available.append(float(available_row))
+                subtotal = 0.0
+                saw_value = False
+                for key in ("available_balance", "blocked_balance", "position_margin", "open_order_margin"):
+                    value = row.get(key)
+                    if value in (None, ""):
+                        continue
+                    subtotal += float(value)
+                    saw_value = True
+                if saw_value:
+                    totals.append(subtotal)
+            if totals:
+                total = max(totals)
+                available = max(candidate_available) if candidate_available else None
+                if available is None:
+                    return None, total, "CoinSwitch returned margin-by-symbol data; total wallet estimated from largest USDT bucket."
+                return available, total, None
+        if isinstance(data, dict) and isinstance(data.get("result"), list):
+            result_rows = data.get("result")
+            if isinstance(result_rows, list):
+                usdt_rows = [row for row in result_rows if isinstance(row, dict) and str(row.get("base_asset", "")).upper() == "USDT"]
+                if usdt_rows:
+                    available_values = [
+                        float(row["available_balance"])
+                        for row in usdt_rows
+                        if row.get("available_balance") not in (None, "")
+                    ]
+                    total_values = [
+                        sum(
+                            float(row[key]) for key in ("blocked_balance", "position_margin", "open_order_margin")
+                            if row.get(key) not in (None, "")
+                        )
+                        for row in usdt_rows
+                    ]
+                    available = max(available_values) if available_values else None
+                    total = max(total_values) if total_values else available
+                    if available is not None or total is not None:
+                        return available, total, None
+        return None, None, "Wallet balance not returned by exchange response."
 
-    async def _fetch_delta_wallet_balance(self, credential: _TradeCredentialSecret) -> float | None:
+    async def _fetch_delta_wallet_balance(self, credential: _TradeCredentialSecret) -> tuple[float | None, float | None]:
         payload = await self._delta_signed_request("GET", "/v2/wallet/balances", credential)
         rows = payload.get("result")
         if not isinstance(rows, list):
-            return None
+            return None, None
 
         selected_value: float | None = None
         for preferred_currency in ("USDT", "INR"):
@@ -685,7 +773,10 @@ class TradeManager:
                     value = row.get(key)
                     if value in (None, ""):
                         continue
-                    return float(value)
+                    available = float(value)
+                    total_raw = row.get("balance") or row.get("wallet_balance") or value
+                    total = float(total_raw) if total_raw not in (None, "") else available
+                    return available, total
 
         for row in rows:
             if not isinstance(row, dict):
@@ -697,7 +788,7 @@ class TradeManager:
                 parsed = float(value)
                 if selected_value is None:
                     selected_value = parsed
-        return selected_value
+        return selected_value, selected_value
 
     async def _coinswitch_server_epoch(self) -> int:
         response = await self.client.get("https://coinswitch.co/trade/api/v2/time")
