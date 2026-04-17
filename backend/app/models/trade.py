@@ -49,7 +49,10 @@ class TradeCredentialVerificationResult(BaseModel):
     exchange: ExchangeName
     ok: bool
     message: str
+    permission_level: Literal["trading", "read_only", "unknown"] = "unknown"
+    permission_note: str | None = None
     wallet_balance_usd: float | None = None
+    wallet_total_usd: float | None = None
     wallet_balance_note: str | None = None
 
 

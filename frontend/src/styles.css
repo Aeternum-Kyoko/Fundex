@@ -527,6 +527,32 @@ button {
   margin-bottom: 8px;
 }
 
+.trade-live-locked-panel {
+  position: relative;
+}
+
+.trade-live-locked-panel > :not(.trade-live-lock-overlay):not(.panel-header) {
+  filter: blur(4px);
+  pointer-events: none;
+  user-select: none;
+}
+
+.trade-live-lock-overlay {
+  position: absolute;
+  inset: 96px 18px 18px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(126, 224, 195, 0.3);
+  background: rgba(10, 17, 32, 0.58);
+  color: rgba(231, 244, 255, 0.96);
+  font-weight: 600;
+  z-index: 4;
+}
+
 .decision-summary-panel {
   margin-top: 22px;
 }

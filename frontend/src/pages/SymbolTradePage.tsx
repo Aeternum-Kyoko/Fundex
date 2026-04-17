@@ -188,6 +188,12 @@ function getCancelTradeNote(session: TradeSessionResponse | null, nowTimestamp: 
   return `Cancellation stays open until ${formatCountdown(session.cancellable_until, nowTimestamp)}.`;
 }
 
+function formatPermissionLabel(level: "trading" | "read_only" | "unknown" | undefined) {
+  if (level === "trading") return "Trading access";
+  if (level === "read_only") return "Read-only access";
+  return "Permission unknown";
+}
+
 function buildTradePdf(session: TradeSessionResponse) {
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -576,6 +582,7 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
         ? "Verify both exchange APIs before arming a live trade."
         : null)
     : null;
+  const livePanelsLocked = !paperTradingEnabled && !liveVerificationPassed;
 
   useEffect(() => {
     setVerification({ status: "idle", message: null, checkedAt: null, results: null });
@@ -907,14 +914,14 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
               <div className="detail-grid compare-detail-grid">
                 {verification.results.map((result) => (
                   <div key={`verify-${result.exchange}`}>
-                    <span className="subtle">
-                      {exchangeLabel(result.exchange)} {result.ok ? "verified" : "failed"}
-                    </span>
-                    <strong>
-                      {result.wallet_balance_usd != null
-                        ? `Wallet: ${formatUsd(result.wallet_balance_usd)}`
-                        : result.wallet_balance_note ?? result.message}
-                    </strong>
+                    <span className="subtle">{exchangeLabel(result.exchange)} {result.ok ? "verified" : "failed"}</span>
+                    <strong>{formatPermissionLabel(result.permission_level)}</strong>
+                    <div className="subtle">
+                      {result.wallet_balance_usd != null || result.wallet_total_usd != null
+                        ? `Wallet available: ${formatUsd(result.wallet_balance_usd ?? null)} | Wallet total: ${formatUsd(result.wallet_total_usd ?? null)}`
+                        : result.wallet_balance_note ?? "Wallet data unavailable"}
+                    </div>
+                    {result.permission_note ? <div className="subtle">{result.permission_note}</div> : null}
                   </div>
                 ))}
               </div>
@@ -942,7 +949,7 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
       </section>
 
       {activePlan ? (
-        <section className="panel compare-panel">
+        <section className={`panel compare-panel ${livePanelsLocked ? "trade-live-locked-panel" : ""}`}>
           <div className="panel-header">
             <div>
               <p className="eyebrow">Execution Preview</p>
@@ -950,6 +957,7 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
               <div className="subtle">This preview stays visible in both paper and live mode so you can test the exact same setup before sending real orders.</div>
             </div>
           </div>
+          {livePanelsLocked ? <div className="trade-live-lock-overlay">Verify APIs to unlock real trade controls.</div> : null}
 
           <div className="execution-outcome-grid">
             <article className="overview-card execution-outcome-card execution-outcome-card-active">
@@ -990,7 +998,7 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
         </section>
       ) : null}
 
-      <section className="panel compare-panel">
+      <section className={`panel compare-panel ${livePanelsLocked ? "trade-live-locked-panel" : ""}`}>
         <div className="panel-header">
           <div>
             <p className="eyebrow">Trade Session</p>
@@ -999,6 +1007,7 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
           </div>
           {session ? <div className="panel-note">{session.current_phase}</div> : null}
         </div>
+        {livePanelsLocked ? <div className="trade-live-lock-overlay">Verify APIs to unlock real trade controls.</div> : null}
 
         {session ? (
           <>
@@ -1063,7 +1072,7 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
       </section>
 
       {completedSession ? (
-        <section className="panel compare-panel trade-report-panel">
+        <section className={`panel compare-panel trade-report-panel ${livePanelsLocked ? "trade-live-locked-panel" : ""}`}>
           <div className="panel-header">
             <div>
               <p className="eyebrow">Completed Trade Summary</p>
@@ -1079,11 +1088,12 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
               </button>
             </div>
           </div>
+          {livePanelsLocked ? <div className="trade-live-lock-overlay">Verify APIs to unlock real trade controls.</div> : null}
           <TradeReportContent session={completedSession} nowTimestamp={nowTimestamp} />
         </section>
       ) : null}
 
-      <section className="panel compare-panel">
+      <section className={`panel compare-panel ${livePanelsLocked ? "trade-live-locked-panel" : ""}`}>
         <div className="panel-header">
           <div>
             <p className="eyebrow">Local Trade History</p>
@@ -1096,6 +1106,7 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
             </button>
           ) : null}
         </div>
+        {livePanelsLocked ? <div className="trade-live-lock-overlay">Verify APIs to unlock real trade controls.</div> : null}
 
         {localTradeHistory.length ? (
           <div className="recent-alert-list">

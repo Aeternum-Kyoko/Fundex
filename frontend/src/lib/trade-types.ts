@@ -35,7 +35,10 @@ export interface TradeCredentialVerificationResult {
   exchange: ExchangeName;
   ok: boolean;
   message: string;
+  permission_level?: "trading" | "read_only" | "unknown";
+  permission_note?: string | null;
   wallet_balance_usd?: number | null;
+  wallet_total_usd?: number | null;
   wallet_balance_note?: string | null;
 }
 
