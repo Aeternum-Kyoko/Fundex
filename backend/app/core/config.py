@@ -57,6 +57,13 @@ class Settings(BaseSettings):
     opportunity_history_retention_days: int = 1
     telegram_alert_state_retention_days: int = 30
     database_path: str = "data/arbradar.db"
+    auth_username: str | None = None
+    auth_password: str | None = None
+    auth_session_secret: str | None = None
+    auth_cookie_name: str = "arbradar_session"
+    auth_session_max_age_seconds: int = 60 * 60 * 12
+    auth_cookie_secure: bool = True
+    auth_cookie_samesite: str = "none"
 
     @property
     def database_file(self) -> Path:

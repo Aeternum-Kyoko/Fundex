@@ -156,6 +156,24 @@ For Vercel production, `VITE_API_URL` should point to your Railway backend, for 
 VITE_API_URL=https://your-backend.up.railway.app/api
 ```
 
+### Authentication
+
+Authentication is enforced by the backend with an HttpOnly signed session cookie. Keep the username, password, and session secret in Railway only:
+
+```bash
+AUTH_USERNAME=...
+AUTH_PASSWORD=...
+AUTH_SESSION_SECRET=...
+AUTH_COOKIE_SECURE=true
+AUTH_COOKIE_SAMESITE=none
+```
+
+Generate `AUTH_SESSION_SECRET` as a long random value, for example with:
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
 ## Runtime Metrics
 
 Useful API checks:
@@ -315,6 +333,11 @@ TELEGRAM_EVENING_SUMMARY_MINUTE=0
 TELEGRAM_NIGHT_SUMMARY_ENABLED=true
 TELEGRAM_NIGHT_SUMMARY_HOUR=22
 TELEGRAM_NIGHT_SUMMARY_MINUTE=0
+AUTH_USERNAME=...
+AUTH_PASSWORD=...
+AUTH_SESSION_SECRET=...
+AUTH_COOKIE_SECURE=true
+AUTH_COOKIE_SAMESITE=none
 ```
 
 Also set your CORS to your Vercel domain, for example:

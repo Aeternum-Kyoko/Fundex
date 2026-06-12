@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
+import { apiFetch } from "../lib/api";
 import type { SymbolComparisonResponse } from "../lib/types";
-
-const API_BASE = import.meta.env.VITE_API_URL ?? "/api";
 
 export function useSymbolComparison(canonicalSymbol: string | null, selectedExchanges: string[] = []) {
   const [comparison, setComparison] = useState<SymbolComparisonResponse | null>(null);
@@ -26,7 +25,7 @@ export function useSymbolComparison(canonicalSymbol: string | null, selectedExch
         const suffix = exchangeQuery
           ? `?exchanges=${encodeURIComponent(exchangeQuery)}`
           : "";
-        const response = await fetch(`${API_BASE}/symbols/${encodeURIComponent(canonicalSymbol)}/comparison${suffix}`);
+        const response = await apiFetch(`/symbols/${encodeURIComponent(canonicalSymbol)}/comparison${suffix}`);
         if (!response.ok) {
           throw new Error("Failed to load symbol comparison.");
         }

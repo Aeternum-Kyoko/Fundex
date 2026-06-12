@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { App } from "./App";
+import { LoginGate } from "./components/LoginGate";
 import { SymbolComparisonPage } from "./pages/SymbolComparisonPage";
 import { SymbolTradePage } from "./pages/SymbolTradePage";
 import { TradeLandingPage } from "./pages/TradeLandingPage";
@@ -25,6 +26,6 @@ function resolveRoute() {
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    {resolveRoute()}
+    <LoginGate>{resolveRoute()}</LoginGate>
   </React.StrictMode>,
 );

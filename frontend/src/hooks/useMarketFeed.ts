@@ -7,8 +7,7 @@ import type {
   FundingSettlementResponse,
   OpportunitiesResponse,
 } from "../lib/types";
-
-const API_BASE = import.meta.env.VITE_API_URL ?? "/api";
+import { apiFetch } from "../lib/api";
 
 const emptyResponse: OpportunitiesResponse = {
   phase: "monitor-only",
@@ -34,10 +33,10 @@ export function useMarketFeed(refreshIntervalMs = 5000, selectedExchanges: strin
     try {
       const suffix = exchangeQuery ? `?exchanges=${encodeURIComponent(exchangeQuery)}` : "";
       const [statusResponse, opportunitiesResponse, fundingLeadersResponse, fundingSettlementsResponse] = await Promise.all([
-        fetch(`${API_BASE}/exchanges/status`),
-        fetch(`${API_BASE}/arbitrage-opportunities${suffix}`),
-        fetch(`${API_BASE}/exchanges/funding-leaders${suffix}`),
-        fetch(`${API_BASE}/exchanges/funding-settlements${suffix}`),
+        apiFetch("/exchanges/status"),
+        apiFetch(`/arbitrage-opportunities${suffix}`),
+        apiFetch(`/exchanges/funding-leaders${suffix}`),
+        apiFetch(`/exchanges/funding-settlements${suffix}`),
       ]);
 
       if (!statusResponse.ok || !opportunitiesResponse.ok || !fundingLeadersResponse.ok || !fundingSettlementsResponse.ok) {

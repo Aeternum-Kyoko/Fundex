@@ -67,6 +67,67 @@ button {
   min-height: 100vh;
 }
 
+.auth-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.auth-panel {
+  width: min(460px, 100%);
+  display: grid;
+  gap: 22px;
+  padding: 28px;
+  border: 1px solid var(--border);
+  border-radius: 26px;
+  background: var(--surface-strong);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(24px) saturate(1.14);
+}
+
+.auth-panel h1 {
+  margin: 0;
+  font-size: 2.6rem;
+  line-height: 0.98;
+}
+
+.auth-copy {
+  margin: 12px 0 0;
+  color: var(--muted);
+}
+
+.auth-form {
+  display: grid;
+  gap: 16px;
+}
+
+.auth-error {
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 125, 125, 0.24);
+  border-radius: 14px;
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.auth-submit {
+  min-height: 48px;
+}
+
+.auth-submit:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.auth-sign-out {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 60;
+  min-width: 92px;
+  min-height: 44px;
+}
+
 .page {
   width: min(1760px, calc(100vw - 32px));
   margin: 0 auto;
