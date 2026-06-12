@@ -1,6 +1,11 @@
 import { FormEvent, ReactNode, useEffect, useState } from "react";
 import { apiFetch } from "../lib/api";
 
+const FRONTEND_AUTH_SESSION_KEY = "arbradar-frontend-auth-session";
+const FRONTEND_AUTH_USERNAME = (import.meta.env.VITE_AUTH_USERNAME as string | undefined)?.trim() ?? "";
+const FRONTEND_AUTH_PASSWORD = (import.meta.env.VITE_AUTH_PASSWORD as string | undefined) ?? "";
+const FRONTEND_AUTH_CONFIGURED = FRONTEND_AUTH_USERNAME.length > 0 && FRONTEND_AUTH_PASSWORD.length > 0;
+
 interface LoginGateProps {
   children: ReactNode;
 }
@@ -12,13 +17,27 @@ interface AuthSession {
 }
 
 export function LoginGate({ children }: LoginGateProps) {
-  const [session, setSession] = useState<AuthSession | null>(null);
+  const [session, setSession] = useState<AuthSession | null>(() => {
+    if (!FRONTEND_AUTH_CONFIGURED || typeof window === "undefined") {
+      return null;
+    }
+
+    return {
+      authenticated: window.sessionStorage.getItem(FRONTEND_AUTH_SESSION_KEY) === "active",
+      configured: true,
+      username: null,
+    };
+  });
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
+    if (FRONTEND_AUTH_CONFIGURED) {
+      return;
+    }
+
     let cancelled = false;
 
     async function loadSession() {
@@ -47,6 +66,13 @@ export function LoginGate({ children }: LoginGateProps) {
   }, []);
 
   const signOut = async () => {
+    if (FRONTEND_AUTH_CONFIGURED) {
+      window.sessionStorage.removeItem(FRONTEND_AUTH_SESSION_KEY);
+      setSession({ authenticated: false, configured: true, username: null });
+      setPassword("");
+      return;
+    }
+
     await apiFetch("/auth/logout", { method: "POST" });
     setSession((current) => ({ authenticated: false, configured: current?.configured ?? true, username: null }));
     setPassword("");
@@ -56,6 +82,21 @@ export function LoginGate({ children }: LoginGateProps) {
     event.preventDefault();
     setIsSubmitting(true);
     setError(null);
+
+    if (FRONTEND_AUTH_CONFIGURED) {
+      if (username.trim() !== FRONTEND_AUTH_USERNAME || password !== FRONTEND_AUTH_PASSWORD) {
+        setError("Invalid username or password.");
+        setPassword("");
+        setIsSubmitting(false);
+        return;
+      }
+
+      window.sessionStorage.setItem(FRONTEND_AUTH_SESSION_KEY, "active");
+      setSession({ authenticated: true, configured: true, username: username.trim() });
+      setPassword("");
+      setIsSubmitting(false);
+      return;
+    }
 
     try {
       const response = await apiFetch("/auth/login", {
@@ -103,7 +144,7 @@ export function LoginGate({ children }: LoginGateProps) {
 
         {!configured ? (
           <div className="banner banner-error">
-            Set AUTH_USERNAME, AUTH_PASSWORD, and AUTH_SESSION_SECRET in the backend environment, then redeploy.
+            Set VITE_AUTH_USERNAME and VITE_AUTH_PASSWORD in Vercel, or deploy backend auth on Railway.
           </div>
         ) : null}
 

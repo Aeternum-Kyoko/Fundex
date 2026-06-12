@@ -174,6 +174,15 @@ Generate `AUTH_SESSION_SECRET` as a long random value, for example with:
 python -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
+If Railway cannot be redeployed immediately, the frontend also supports a temporary Vercel-only lock:
+
+```bash
+VITE_AUTH_USERNAME=...
+VITE_AUTH_PASSWORD=...
+```
+
+This hides the site behind the Vercel frontend login page, but it is not as strong as backend auth because Vite build-time variables are present in the browser bundle.
+
 ## Runtime Metrics
 
 Useful API checks:
@@ -376,6 +385,13 @@ Vercel handles Vite builds natively. The key frontend production variable is:
 
 ```bash
 VITE_API_URL=https://your-backend.up.railway.app/api
+```
+
+Temporary frontend-only auth variables, if backend auth is not deployed yet:
+
+```bash
+VITE_AUTH_USERNAME=...
+VITE_AUTH_PASSWORD=...
 ```
 
 After changing Vercel environment variables, create a new deployment so the built frontend picks them up.
