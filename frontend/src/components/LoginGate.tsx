@@ -1,126 +1,59 @@
-import { FormEvent, ReactNode, useEffect, useState } from "react";
-import { apiFetch } from "../lib/api";
+import { FormEvent, ReactNode, useState } from "react";
 
-const FRONTEND_AUTH_SESSION_KEY = "arbradar-frontend-auth-session";
-const FRONTEND_AUTH_USERNAME = (import.meta.env.VITE_AUTH_USERNAME as string | undefined)?.trim() ?? "";
-const FRONTEND_AUTH_PASSWORD = (import.meta.env.VITE_AUTH_PASSWORD as string | undefined) ?? "";
-const FRONTEND_AUTH_CONFIGURED = FRONTEND_AUTH_USERNAME.length > 0 && FRONTEND_AUTH_PASSWORD.length > 0;
+const AUTH_SESSION_KEY = "arbradar-frontend-auth-session";
+const AUTH_USERNAME = (import.meta.env.VITE_AUTH_USERNAME as string | undefined)?.trim() ?? "";
+const AUTH_PASSWORD = (import.meta.env.VITE_AUTH_PASSWORD as string | undefined) ?? "";
 
 interface LoginGateProps {
   children: ReactNode;
 }
 
-interface AuthSession {
-  authenticated: boolean;
-  configured: boolean;
-  username: string | null;
+function isConfigured() {
+  return AUTH_USERNAME.length > 0 && AUTH_PASSWORD.length > 0;
+}
+
+function readSession() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  return window.sessionStorage.getItem(AUTH_SESSION_KEY) === "active";
 }
 
 export function LoginGate({ children }: LoginGateProps) {
-  const [session, setSession] = useState<AuthSession | null>(() => {
-    if (!FRONTEND_AUTH_CONFIGURED || typeof window === "undefined") {
-      return null;
-    }
-
-    return {
-      authenticated: window.sessionStorage.getItem(FRONTEND_AUTH_SESSION_KEY) === "active",
-      configured: true,
-      username: null,
-    };
-  });
+  const [isAuthenticated, setIsAuthenticated] = useState(readSession);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const configured = isConfigured();
 
-  useEffect(() => {
-    if (FRONTEND_AUTH_CONFIGURED) {
-      return;
-    }
-
-    let cancelled = false;
-
-    async function loadSession() {
-      try {
-        const response = await apiFetch("/auth/session");
-        if (!response.ok) {
-          throw new Error("Unable to verify login session.");
-        }
-        const payload = (await response.json()) as AuthSession;
-        if (!cancelled) {
-          setSession(payload);
-        }
-      } catch {
-        if (!cancelled) {
-          setSession({ authenticated: false, configured: false, username: null });
-          setError("Unable to reach the authentication server.");
-        }
-      }
-    }
-
-    void loadSession();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const signOut = async () => {
-    if (FRONTEND_AUTH_CONFIGURED) {
-      window.sessionStorage.removeItem(FRONTEND_AUTH_SESSION_KEY);
-      setSession({ authenticated: false, configured: true, username: null });
-      setPassword("");
-      return;
-    }
-
-    await apiFetch("/auth/logout", { method: "POST" });
-    setSession((current) => ({ authenticated: false, configured: current?.configured ?? true, username: null }));
+  const signOut = () => {
+    window.sessionStorage.removeItem(AUTH_SESSION_KEY);
+    setIsAuthenticated(false);
     setPassword("");
   };
 
-  const submitLogin = async (event: FormEvent<HTMLFormElement>) => {
+  const submitLogin = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setIsSubmitting(true);
     setError(null);
 
-    if (FRONTEND_AUTH_CONFIGURED) {
-      if (username.trim() !== FRONTEND_AUTH_USERNAME || password !== FRONTEND_AUTH_PASSWORD) {
-        setError("Invalid username or password.");
-        setPassword("");
-        setIsSubmitting(false);
-        return;
-      }
-
-      window.sessionStorage.setItem(FRONTEND_AUTH_SESSION_KEY, "active");
-      setSession({ authenticated: true, configured: true, username: username.trim() });
-      setPassword("");
-      setIsSubmitting(false);
+    if (!configured) {
+      setError("Login credentials are not configured.");
       return;
     }
 
-    try {
-      const response = await apiFetch("/auth/login", {
-        method: "POST",
-        body: JSON.stringify({ username, password }),
-      });
-
-      if (!response.ok) {
-        setError(response.status === 401 ? "Invalid username or password." : "Login failed.");
-        setPassword("");
-        return;
-      }
-
-      const payload = (await response.json()) as Pick<AuthSession, "authenticated" | "username">;
-      setSession({ authenticated: payload.authenticated, configured: true, username: payload.username });
+    if (username.trim() !== AUTH_USERNAME || password !== AUTH_PASSWORD) {
+      setError("Invalid username or password.");
       setPassword("");
-    } catch {
-      setError("Unable to reach the authentication server.");
-    } finally {
-      setIsSubmitting(false);
+      return;
     }
+
+    window.sessionStorage.setItem(AUTH_SESSION_KEY, "active");
+    setIsAuthenticated(true);
+    setPassword("");
   };
 
-  if (session?.authenticated) {
+  if (isAuthenticated && configured) {
     return (
       <>
         <button type="button" className="auth-sign-out action-button secondary-button" onClick={signOut}>
@@ -130,8 +63,6 @@ export function LoginGate({ children }: LoginGateProps) {
       </>
     );
   }
-
-  const configured = session?.configured ?? true;
 
   return (
     <main className="auth-page">
@@ -143,9 +74,7 @@ export function LoginGate({ children }: LoginGateProps) {
         </div>
 
         {!configured ? (
-          <div className="banner banner-error">
-            Set VITE_AUTH_USERNAME and VITE_AUTH_PASSWORD in Vercel, or deploy backend auth on Railway.
-          </div>
+          <div className="banner banner-error">Set VITE_AUTH_USERNAME and VITE_AUTH_PASSWORD in Vercel, then redeploy.</div>
         ) : null}
 
         <form className="auth-form" onSubmit={submitLogin}>
@@ -156,7 +85,7 @@ export function LoginGate({ children }: LoginGateProps) {
               onChange={(event) => setUsername(event.target.value)}
               autoComplete="username"
               autoFocus
-              disabled={!configured || isSubmitting}
+              disabled={!configured}
             />
           </label>
           <label className="control">
@@ -166,12 +95,12 @@ export function LoginGate({ children }: LoginGateProps) {
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               autoComplete="current-password"
-              disabled={!configured || isSubmitting}
+              disabled={!configured}
             />
           </label>
           {error ? <div className="auth-error">{error}</div> : null}
-          <button type="submit" className="action-button auth-submit" disabled={!configured || isSubmitting || session === null}>
-            {isSubmitting ? "Unlocking..." : "Unlock"}
+          <button type="submit" className="action-button auth-submit" disabled={!configured}>
+            Unlock
           </button>
         </form>
       </section>

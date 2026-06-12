@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { apiFetch } from "../lib/api";
 import type { FundingTrendSeries, FundingTrendsResponse } from "../lib/types";
+
+const API_BASE = import.meta.env.VITE_API_URL ?? "/api";
 
 export function useFundingTrends(symbols: string[], exchanges: string[], limit = 16) {
   const [series, setSeries] = useState<FundingTrendSeries[]>([]);
@@ -31,7 +32,7 @@ export function useFundingTrends(symbols: string[], exchanges: string[], limit =
           exchanges: normalizedExchanges.join(","),
           limit: String(limit),
         });
-        const response = await apiFetch(`/exchanges/funding-trends?${params.toString()}`);
+        const response = await fetch(`${API_BASE}/exchanges/funding-trends?${params.toString()}`);
         if (!response.ok) {
           throw new Error("Failed to load funding trends.");
         }

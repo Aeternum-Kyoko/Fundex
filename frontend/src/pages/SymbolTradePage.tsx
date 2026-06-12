@@ -16,7 +16,6 @@ import {
   getExchangeCapabilityBadges,
   getNextFundingTime,
 } from "../lib/monitor";
-import { apiFetch } from "../lib/api";
 import type { ExchangeName } from "../lib/types";
 import type {
   TradeCredentialInput,
@@ -29,6 +28,7 @@ const TRADE_CREDENTIALS_KEY = "arbradar-trade-credentials";
 const PAPER_GUIDE_KEY = "arbradar-paper-guide-seen";
 const DEFAULT_COINSWITCH_EXCHANGE = "EXCHANGE_2";
 const CANCEL_LOCK_WINDOW_MINUTES = 10;
+const API_BASE = import.meta.env.VITE_API_URL ?? "/api";
 
 type TradeCredentialState = Record<string, { api_key: string; api_secret: string; extra?: Record<string, string> }>;
 type VerificationState =
@@ -651,8 +651,9 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
 
     setVerification({ status: "checking", message: "Verifying exchange APIs...", checkedAt: null, results: null });
     try {
-      const response = await apiFetch("/trade/verify-credentials", {
+      const response = await fetch(`${API_BASE}/trade/verify-credentials`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           required_exchanges: requiredExchanges,
           credentials: liveCredentialPayload,

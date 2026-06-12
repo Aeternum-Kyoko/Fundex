@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { apiFetch } from "../lib/api";
 import type { OpportunityHistoryResponse } from "../lib/types";
+
+const API_BASE = import.meta.env.VITE_API_URL ?? "/api";
 
 export function useOpportunityHistory(canonicalSymbol: string | null, limit = 48) {
   const [history, setHistory] = useState<OpportunityHistoryResponse | null>(null);
@@ -17,7 +18,9 @@ export function useOpportunityHistory(canonicalSymbol: string | null, limit = 48
 
       setLoading(true);
       try {
-        const response = await apiFetch(`/opportunities/${encodeURIComponent(canonicalSymbol)}/history?limit=${limit}`);
+        const response = await fetch(
+          `${API_BASE}/opportunities/${encodeURIComponent(canonicalSymbol)}/history?limit=${limit}`,
+        );
         if (!response.ok) {
           throw new Error("Failed to load opportunity history.");
         }

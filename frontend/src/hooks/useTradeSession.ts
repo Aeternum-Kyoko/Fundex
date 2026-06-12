@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { apiFetch } from "../lib/api";
 import type { TradeCreateRequest, TradeSessionResponse } from "../lib/trade-types";
 
+const API_BASE = import.meta.env.VITE_API_URL ?? "/api";
 const TRADE_HISTORY_KEY = "arbradar-trade-history";
 const TRADE_HISTORY_LIMIT = 40;
 
@@ -53,7 +53,7 @@ export function useTradeSession(scope = "global") {
   );
 
   const refreshSession = useCallback(async (sessionId: string) => {
-    const response = await apiFetch(`/trade/sessions/${encodeURIComponent(sessionId)}`);
+    const response = await fetch(`${API_BASE}/trade/sessions/${encodeURIComponent(sessionId)}`);
     if (!response.ok) {
       throw new Error("Failed to refresh trade session.");
     }
@@ -66,8 +66,11 @@ export function useTradeSession(scope = "global") {
     setLoading(true);
     setError(null);
     try {
-      const response = await apiFetch("/trade/sessions", {
+      const response = await fetch(`${API_BASE}/trade/sessions`, {
         method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify(payload),
       });
       if (!response.ok) {
@@ -90,7 +93,7 @@ export function useTradeSession(scope = "global") {
     setLoading(true);
     setError(null);
     try {
-      const response = await apiFetch(`/trade/sessions/${encodeURIComponent(sessionId)}/cancel`, {
+      const response = await fetch(`${API_BASE}/trade/sessions/${encodeURIComponent(sessionId)}/cancel`, {
         method: "POST",
       });
       if (!response.ok) {

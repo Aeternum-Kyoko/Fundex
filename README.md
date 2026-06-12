@@ -156,33 +156,6 @@ For Vercel production, `VITE_API_URL` should point to your Railway backend, for 
 VITE_API_URL=https://your-backend.up.railway.app/api
 ```
 
-### Authentication
-
-Authentication is enforced by the backend with an HttpOnly signed session cookie. Keep the username, password, and session secret in Railway only:
-
-```bash
-AUTH_USERNAME=...
-AUTH_PASSWORD=...
-AUTH_SESSION_SECRET=...
-AUTH_COOKIE_SECURE=true
-AUTH_COOKIE_SAMESITE=none
-```
-
-Generate `AUTH_SESSION_SECRET` as a long random value, for example with:
-
-```bash
-python -c "import secrets; print(secrets.token_urlsafe(48))"
-```
-
-If Railway cannot be redeployed immediately, the frontend also supports a temporary Vercel-only lock:
-
-```bash
-VITE_AUTH_USERNAME=...
-VITE_AUTH_PASSWORD=...
-```
-
-This hides the site behind the Vercel frontend login page, but it is not as strong as backend auth because Vite build-time variables are present in the browser bundle.
-
 ## Runtime Metrics
 
 Useful API checks:
@@ -342,11 +315,6 @@ TELEGRAM_EVENING_SUMMARY_MINUTE=0
 TELEGRAM_NIGHT_SUMMARY_ENABLED=true
 TELEGRAM_NIGHT_SUMMARY_HOUR=22
 TELEGRAM_NIGHT_SUMMARY_MINUTE=0
-AUTH_USERNAME=...
-AUTH_PASSWORD=...
-AUTH_SESSION_SECRET=...
-AUTH_COOKIE_SECURE=true
-AUTH_COOKIE_SAMESITE=none
 ```
 
 Also set your CORS to your Vercel domain, for example:
@@ -385,11 +353,6 @@ Vercel handles Vite builds natively. The key frontend production variable is:
 
 ```bash
 VITE_API_URL=https://your-backend.up.railway.app/api
-```
-
-Temporary frontend-only auth variables, if backend auth is not deployed yet:
-
-```bash
 VITE_AUTH_USERNAME=...
 VITE_AUTH_PASSWORD=...
 ```

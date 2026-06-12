@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, Request, Response, status
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
 
 from app.models.execution import ExecutionPlanResponse
 from app.models.market import (
@@ -27,52 +25,12 @@ from app.models.trade import (
     TradeSessionResponse,
 )
 from app.services.arbitrage import build_opportunities
-from app.services.auth import (
-    auth_is_configured,
-    clear_session_cookie,
-    create_session_token,
-    get_session_payload,
-    set_session_cookie,
-    verify_credentials,
-)
 from app.services.execution import build_execution_plan, reverse_opportunity
 from app.services.funding_leaders import build_funding_leaders
 from app.services.links import exchange_display_name, exchange_trade_url
 from app.services.opportunity_ranker import is_snapshot_usable
 
 router = APIRouter()
-FAILED_LOGIN_WINDOW_SECONDS = 15 * 60
-FAILED_LOGIN_LIMIT = 5
-_failed_login_attempts: dict[str, list[float]] = {}
-
-
-class LoginRequest(BaseModel):
-    username: str
-    password: str
-
-
-def _login_rate_limit_key(request: Request, username: str) -> str:
-    forwarded_for = request.headers.get("x-forwarded-for", "")
-    client_host = forwarded_for.split(",", 1)[0].strip() or (request.client.host if request.client else "unknown")
-    return f"{client_host}:{username.strip().lower()}"
-
-
-def _record_failed_login(key: str) -> None:
-    now = time.time()
-    attempts = [attempt for attempt in _failed_login_attempts.get(key, []) if now - attempt < FAILED_LOGIN_WINDOW_SECONDS]
-    attempts.append(now)
-    _failed_login_attempts[key] = attempts
-
-
-def _clear_failed_login(key: str) -> None:
-    _failed_login_attempts.pop(key, None)
-
-
-def _is_login_rate_limited(key: str) -> bool:
-    now = time.time()
-    attempts = [attempt for attempt in _failed_login_attempts.get(key, []) if now - attempt < FAILED_LOGIN_WINDOW_SECONDS]
-    _failed_login_attempts[key] = attempts
-    return len(attempts) >= FAILED_LOGIN_LIMIT
 
 
 def _enabled_exchanges(request: Request) -> list[str]:
@@ -97,45 +55,6 @@ async def _snapshots_for_exchanges(request: Request, exchanges: list[str]) -> li
 @router.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok", "phase": "phase-4-monitor"}
-
-
-@router.get("/auth/session")
-async def auth_session(request: Request) -> dict[str, bool | str | None]:
-    settings = request.app.state.settings
-    if not auth_is_configured(settings):
-        return {"authenticated": False, "configured": False, "username": None}
-
-    payload = get_session_payload(request)
-    return {
-        "authenticated": payload is not None,
-        "configured": True,
-        "username": settings.auth_username if payload is not None else None,
-    }
-
-
-@router.post("/auth/login")
-async def auth_login(request: Request, response: Response, payload: LoginRequest) -> dict[str, bool | str]:
-    settings = request.app.state.settings
-    if not auth_is_configured(settings):
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Authentication is not configured.")
-
-    rate_limit_key = _login_rate_limit_key(request, payload.username)
-    if _is_login_rate_limited(rate_limit_key):
-        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many failed login attempts. Try again later.")
-
-    if not verify_credentials(settings, payload.username, payload.password):
-        _record_failed_login(rate_limit_key)
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password.")
-
-    _clear_failed_login(rate_limit_key)
-    set_session_cookie(response, settings, create_session_token(settings))
-    return {"authenticated": True, "username": settings.auth_username or ""}
-
-
-@router.post("/auth/logout")
-async def auth_logout(request: Request, response: Response) -> dict[str, bool]:
-    clear_session_cookie(response, request.app.state.settings)
-    return {"authenticated": False}
 
 
 @router.get("/system/metrics")

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { apiFetch } from "../lib/api";
 import type { ExecutionPlanResponse } from "../lib/execution-types";
+
+const API_BASE = import.meta.env.VITE_API_URL ?? "/api";
 
 interface ExecutionPlanOptions {
   capitalUsd?: number;
@@ -46,8 +47,8 @@ export function useExecutionPlan(
         const leverageOverrideSuffix = leverageOverrideEntries.length
           ? `&leverage_overrides=${encodeURIComponent(JSON.stringify(Object.fromEntries(leverageOverrideEntries)))}`
           : "";
-        const response = await apiFetch(
-          `/opportunities/${encodeURIComponent(canonicalSymbol)}/execution-plan?capital_usd=${encodeURIComponent(capitalUsd)}&leverage=${encodeURIComponent(leverage)}&holding_periods=${encodeURIComponent(holdingPeriods)}&basis_risk_buffer_percent=0.35${reverseSuffix}${exchangeSuffix}${leverageOverrideSuffix}`,
+        const response = await fetch(
+          `${API_BASE}/opportunities/${encodeURIComponent(canonicalSymbol)}/execution-plan?capital_usd=${encodeURIComponent(capitalUsd)}&leverage=${encodeURIComponent(leverage)}&holding_periods=${encodeURIComponent(holdingPeriods)}&basis_risk_buffer_percent=0.35${reverseSuffix}${exchangeSuffix}${leverageOverrideSuffix}`,
         );
         if (!response.ok) {
           throw new Error("Failed to load execution helper.");
