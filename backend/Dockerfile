@@ -8,8 +8,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 
-# SQLite (journal, history, encrypted keys) lives on a mounted volume so it survives redeploys.
-VOLUME ["/app/data"]
+# SQLite (journal, history, encrypted keys) lives in /app/data. Mount a volume there so it survives
+# redeploys (a Railway Volume, or a named volume in docker compose). Railway rejects the VOLUME instruction.
+RUN mkdir -p /app/data
 EXPOSE 8000
 
 # Hosts such as Railway inject $PORT; fall back to 8000 elsewhere. Live-update streams stay open,
