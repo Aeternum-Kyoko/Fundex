@@ -176,6 +176,8 @@ Backtest (`/backtest`, `POST /api/backtest/run`, `POST /api/backtest/resimulate`
 
 Deployment: see `deploy/DEPLOY.md` (Oracle Cloud Always Free + Docker + Caddy HTTPS).
 
+Railway: point the service at this repository (the root `Dockerfile` builds the backend; setting Root Directory to `backend` also works). Add a volume mounted at `/app/data`, choose the Singapore region (Binance blocks US servers), expose the generated domain, and set the variables listed above. Railway injects `PORT`, which the container honours. The health check is `/api/health`.
+
 ### Frontend
 
 Create `frontend/.env.local` for local use or set the same variable in Vercel:

@@ -1,0 +1,9 @@
+.git
+frontend
+deploy
+backend/.venv
+backend/data
+backend/tests
+backend/.env
+**/__pycache__
+**/*.pyc
