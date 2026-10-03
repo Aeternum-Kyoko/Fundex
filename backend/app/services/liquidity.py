@@ -92,6 +92,49 @@ def build_depth_quote(
     )
 
 
+DEPTH_SIZES_USD = (500.0, 1_000.0, 2_500.0, 5_000.0, 10_000.0, 25_000.0, 50_000.0, 100_000.0)
+
+
+def max_size_within(levels: list[tuple[float, float]], mid_price: float, limit_percent: float) -> float:
+    """Largest notional (USD) one side of the book fills while average impact stays within `limit_percent`."""
+    if not levels or mid_price <= 0:
+        return 0.0
+    total = sum(price * size for price, size in levels if price > 0 and size > 0)
+    low, high = 0.0, total
+    for _ in range(40):
+        middle = (low + high) / 2
+        impact = impact_percent(levels, middle, mid_price) if middle > 0 else 0.0
+        if impact is not None and impact <= limit_percent:
+            low = middle
+        else:
+            high = middle
+    return low
+
+
+def depth_profile(
+    bids: list[tuple[float, float]],
+    asks: list[tuple[float, float]],
+    sizes: tuple[float, ...] = DEPTH_SIZES_USD,
+    limit_percent: float = 0.1,
+) -> dict | None:
+    """Slippage by order size for one venue, plus the biggest size that stays under `limit_percent`."""
+    bids = sorted(((p, q) for p, q in bids if p > 0 and q > 0), key=lambda level: -level[0])
+    asks = sorted(((p, q) for p, q in asks if p > 0 and q > 0), key=lambda level: level[0])
+    if not bids or not asks or asks[0][0] <= bids[0][0] * 0.5:
+        return None
+    mid = (bids[0][0] + asks[0][0]) / 2
+    return {
+        "mid_price": mid,
+        "top_of_book_spread_percent": (asks[0][0] - bids[0][0]) / mid * 100,
+        "limit_percent": limit_percent,
+        "max_size_usd": min(max_size_within(asks, mid, limit_percent), max_size_within(bids, mid, limit_percent)),
+        "sizes": [
+            {"size_usd": size, "buy_percent": impact_percent(asks, size, mid), "sell_percent": impact_percent(bids, size, mid)}
+            for size in sizes
+        ],
+    }
+
+
 class OrderBookFetcher:
     """Public L2 books, normalised to (price, base quantity)."""
 

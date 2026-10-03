@@ -5,10 +5,12 @@ import { CompareDialog, Dialog, FeedsPanel } from "./panels";
 import { BrandMark, Icon } from "./primitives";
 import "./design.css";
 import "./legacy.css";
+import "./features.css";
+import "./apple.css";
 
 export type NavKey = "dashboard" | "trade" | "results" | "backtest";
 export type ActiveKey = NavKey | "compare";
-export type SectionTab = "leaders" | "settlements" | "alerts";
+export type SectionTab = "leaders" | "heatmap" | "trends" | "calendar" | "settlements" | "alerts";
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "/api";
 const THEME_KEY = "arbradar-theme";
@@ -43,6 +45,49 @@ export function useTheme() {
   return [theme, setTheme] as const;
 }
 
+interface InstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
+}
+
+function isStandalone() {
+  return window.matchMedia("(display-mode: standalone)").matches || (navigator as Navigator & { standalone?: boolean }).standalone === true;
+}
+
+/** Android and desktop Chrome offer a real install prompt; iPhone and iPad only have Share, Add to Home Screen. */
+export function useInstall() {
+  const [event, setEvent] = useState<InstallPromptEvent | null>(null);
+  const [installed, setInstalled] = useState(() => isStandalone());
+  useEffect(() => {
+    const onPrompt = (next: Event) => {
+      next.preventDefault();
+      setEvent(next as InstallPromptEvent);
+    };
+    const onInstalled = () => {
+      setInstalled(true);
+      setEvent(null);
+    };
+    window.addEventListener("beforeinstallprompt", onPrompt);
+    window.addEventListener("appinstalled", onInstalled);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", onPrompt);
+      window.removeEventListener("appinstalled", onInstalled);
+    };
+  }, []);
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  return {
+    installed,
+    canPrompt: Boolean(event),
+    showIosHint: ios && !installed,
+    install: async () => {
+      if (!event) return;
+      await event.prompt();
+      await event.userChoice;
+      setEvent(null);
+    },
+  };
+}
+
 export interface MoreItem {
   label: string;
   description: string;
@@ -73,7 +118,8 @@ function scrollTop() {
 
 export function AppChrome({ active, children, topMiddle, topActions, hideBrandText, moreExtras = [], onSection, exchangesQuery = "", legacy = false }: AppChromeProps) {
   const [theme, setTheme] = useTheme();
-  const [panel, setPanel] = useState<null | "more" | "compare">(null);
+  const [panel, setPanel] = useState<null | "more" | "compare" | "ios">(null);
+  const install = useInstall();
   const [adminOpen, setAdminOpen] = useState(false);
   const [statuses, setStatuses] = useState<ExchangeStatus[]>([]);
   const closePanel = useCallback(() => setPanel(null), []);
@@ -107,8 +153,17 @@ export function AppChrome({ active, children, topMiddle, topActions, hideBrandTe
   const items: MoreItem[] = [
     { label: "Compare a coin", description: "Every exchange side by side for one coin", onClick: () => setPanel("compare") },
     sectionItem("leaders", "Funding leaders", "Highest and lowest rates on each exchange"),
+    sectionItem("heatmap", "Funding heatmap", "Every coin and exchange, coloured by rate"),
+    sectionItem("trends", "Rate history", "How funding rates moved on each exchange"),
+    sectionItem("calendar", "Settlement calendar", "The next 24 hours of funding payments"),
     sectionItem("settlements", "Settlements", "Funding payments coming up, soonest first"),
     sectionItem("alerts", "Alerts", "Rules that tell you when a pair is worth a look"),
+    ...(install.canPrompt
+      ? [{ label: "Install Fundex", description: "Add it to your home screen or dock and open it like an app", onClick: () => { closePanel(); void install.install(); } }]
+      : install.showIosHint
+        ? [{ label: "Add to Home Screen", description: "Use Fundex like an app on iPhone and iPad", onClick: () => setPanel("ios") }]
+        : []),
+    { label: "How Fundex works", description: "Funding arbitrage, costs and trust levels explained", href: "/learn" },
     { label: "Telegram bot", description: "Alerts and /next, /coin, /trades in Telegram", href: TELEGRAM_BOT_URL, external: true },
     { label: theme === "dark" ? "Light theme" : "Dark theme", description: "Switch the look", onClick: () => setTheme(theme === "dark" ? "light" : "dark") },
     { label: "Exchange API keys", description: "Admin: fee tier and CoinSwitch access", onClick: () => { closePanel(); setAdminOpen(true); } },
@@ -186,6 +241,15 @@ export function AppChrome({ active, children, topMiddle, topActions, hideBrandTe
             Exchange feeds
           </h3>
           <FeedsPanel statuses={statuses} />
+        </Dialog>
+      ) : null}
+      {panel === "ios" ? (
+        <Dialog title="Add Fundex to your Home Screen" onClose={closePanel}>
+          <ol className="ln-steps">
+            <li>Tap the <strong>Share</strong> button in Safari's toolbar.</li>
+            <li>Scroll down and tap <strong>Add to Home Screen</strong>.</li>
+            <li>Tap <strong>Add</strong>. Fundex opens full screen, without the browser bars.</li>
+          </ol>
         </Dialog>
       ) : null}
       {panel === "compare" ? <CompareDialog exchangesQuery={exchangesQuery} initial="" onClose={closePanel} /> : null}

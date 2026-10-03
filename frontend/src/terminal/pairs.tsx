@@ -2,6 +2,8 @@ import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { formatLeverage, formatUsd } from "../lib/monitor";
 import type { ArbitrageOpportunity, OpportunityLeg } from "../lib/types";
+import { RiskChips } from "./insights";
+import { MiniSpark, type SparkMap } from "./trends";
 import { Countdown, EdgeLine, type EdgeScale, ExchangeTag, hoursLabel, nextPayout, pct, TrustBadge } from "./primitives";
 
 export type SortKey = "net" | "spread" | "breakeven" | "trust" | "next" | "coin" | "oi";
@@ -14,6 +16,7 @@ interface ListProps {
   onSelect: (symbol: string) => void;
   horizonLabel: string;
   exchangesQuery: string;
+  sparks?: SparkMap;
 }
 
 function useScrollMargin() {
@@ -97,6 +100,7 @@ export function PairTable({
   sort,
   onSort,
   density,
+  sparks,
 }: ListProps & { sort: SortKey; onSort: (key: SortKey) => void; density: Density }) {
   const [anchor, scrollMargin] = useScrollMargin();
   const detailed = density === "detailed";
@@ -146,6 +150,7 @@ export function PairTable({
               top={item.start - scrollMargin}
               detailed={detailed}
               exchangesQuery={exchangesQuery}
+              spark={sparks?.[row.canonical_symbol]}
             />
           );
         })}
@@ -162,6 +167,7 @@ const PairRow = memo(function PairRow({
   top,
   detailed,
   exchangesQuery,
+  spark,
 }: {
   row: ArbitrageOpportunity;
   scale: EdgeScale;
@@ -170,6 +176,7 @@ const PairRow = memo(function PairRow({
   top: number;
   detailed: boolean;
   exchangesQuery: string;
+  spark?: number[];
 }) {
   const flash = useFlash(row.net_return_percent);
   const profitable = row.net_return_percent > 0;
@@ -200,7 +207,10 @@ const PairRow = memo(function PairRow({
       <EdgeLine opportunity={row} scale={scale} />
       {detailed ? <LegCell leg={row.long_leg} fallback={row.funding_interval_hours} /> : null}
       {detailed ? <LegCell leg={row.short_leg} fallback={row.funding_interval_hours} /> : null}
-      <span className="t-num t-right">{pct(row.spread_rate * 100, 4)}</span>
+      <span className="t-num t-right t-spread-cell">
+        {spark ? <MiniSpark values={spark} width={44} height={18} label={`${row.base_asset} spread trend`} /> : null}
+        {pct(row.spread_rate * 100, 4)}
+      </span>
       <span className="t-cell-stack t-right">
         <span className={`t-num ${profitable ? "t-receive" : "t-pay"}`}>{pct(row.net_return_percent, 3, true)}</span>
         <small className="t-num">{pct(row.net_apr_percent, 1)} APR</small>
@@ -213,8 +223,9 @@ const PairRow = memo(function PairRow({
           {formatLeverage(row.long_leg.max_leverage)} / {formatLeverage(row.short_leg.max_leverage)}
         </span>
       ) : null}
-      <span>
+      <span className="t-cell-stack">
         <TrustBadge level={row.trust_level} compact />
+        <RiskChips opportunity={row} max={1} />
       </span>
       <span className="t-right t-soft">
         <Countdown target={nextPayout(row)} />
@@ -224,7 +235,7 @@ const PairRow = memo(function PairRow({
   );
 });
 
-export function PairCards({ rows, scale, selected, onSelect, horizonLabel, exchangesQuery }: ListProps) {
+export function PairCards({ rows, scale, selected, onSelect, horizonLabel, exchangesQuery, sparks }: ListProps) {
   const [anchor, scrollMargin] = useScrollMargin();
   const virtualizer = useWindowVirtualizer({
     count: rows.length,
@@ -247,6 +258,7 @@ export function PairCards({ rows, scale, selected, onSelect, horizonLabel, excha
             top={item.start - scrollMargin}
             horizonLabel={horizonLabel}
             exchangesQuery={exchangesQuery}
+            spark={sparks?.[row.canonical_symbol]}
           />
         );
       })}
@@ -261,6 +273,7 @@ const PairCard = memo(function PairCard({
   top,
   horizonLabel,
   exchangesQuery,
+  spark,
 }: {
   row: ArbitrageOpportunity;
   scale: EdgeScale;
@@ -269,6 +282,7 @@ const PairCard = memo(function PairCard({
   top: number;
   horizonLabel: string;
   exchangesQuery: string;
+  spark?: number[];
 }) {
   const flash = useFlash(row.net_return_percent);
   const profitable = row.net_return_percent > 0;
@@ -298,13 +312,15 @@ const PairCard = memo(function PairCard({
       <EdgeLine opportunity={row} scale={scale} height={22} />
       <span className="t-card-meta">
         <TrustBadge level={row.trust_level} compact />
+        <RiskChips opportunity={row} max={1} />
         <span className="t-num">Break-even {hoursLabel(row.break_even_hours)}</span>
         <span>
           Pays in <Countdown target={nextPayout(row)} />
         </span>
       </span>
       <span className="t-card-meta">
-        <span className="t-num">
+        <span className="t-num t-spread-cell">
+          {spark ? <MiniSpark values={spark} width={44} height={18} label={`${row.base_asset} spread trend`} /> : null}
           Spread {pct(row.spread_rate * 100, 4)} /8h
         </span>
         <RowActions symbol={row.canonical_symbol} exchangesQuery={exchangesQuery} />

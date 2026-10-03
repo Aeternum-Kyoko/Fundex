@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
-import { formatPrice } from "../lib/monitor";
-import type { ArbitrageOpportunity, OpportunityHistoryPoint, OpportunityLeg } from "../lib/types";
+import { useSymbolComparison } from "../hooks/useSymbolComparison";
+import { formatLeverage, formatPrice, formatUsd } from "../lib/monitor";
+import type { ArbitrageOpportunity, OpportunityHistoryPoint, OpportunityLeg, SymbolComparisonExchangeSnapshot } from "../lib/types";
 import { CaptureBlock, type CaptureRow } from "./capture";
 import { tradeHref } from "./pairs";
 import { useClock } from "./clock";
-import { Countdown, EdgeLine, type EdgeScale, EXCHANGE_SHORT, hoursLabel, Icon, legRateLabel, pct, TrustBadge } from "./primitives";
+import type { TradeSessionResponse } from "../lib/trade-types";
+import { BacktestConfidence, DepthBlock, PersistenceBlock, PositionNote, RiskChips, riskFlags } from "./insights";
+import { TrendBlock } from "./trends";
+import { ExchangeTag, Countdown, EdgeLine, type EdgeScale, EXCHANGE_SHORT, hoursLabel, Icon, legRateLabel, pct, TrustBadge } from "./primitives";
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "/api";
 
@@ -49,6 +53,41 @@ function Sparkline({ points }: { points: OpportunityHistoryPoint[] }) {
           now {pct(values[values.length - 1], 4)} /8h, range {pct(Math.min(...values), 4)} to {pct(Math.max(...values), 4)}
         </span>
       </div>
+    </>
+  );
+}
+
+/** Every exchange that lists the coin (ignoring the dashboard scope), with the pair's two legs marked. */
+function AllExchanges({ opportunity, rows, loading }: { opportunity: ArbitrageOpportunity; rows: SymbolComparisonExchangeSnapshot[]; loading: boolean }) {
+  if (loading && !rows.length) return <p className="t-muted">Loading every exchange…</p>;
+  if (!rows.length) return <p className="t-muted">No other exchange lists {opportunity.base_asset} right now.</p>;
+  return (
+    <>
+      <ul className="ax-list">
+        {rows.map((row) => {
+          const side = row.exchange === opportunity.long_leg.exchange ? "long" : row.exchange === opportunity.short_leg.exchange ? "short" : null;
+          return (
+            <li key={row.exchange}>
+              <a className="ax-row" href={row.trade_url} target="_blank" rel="noreferrer" data-side={side ?? undefined} title={`Open ${row.exchange_symbol} on ${row.display_name}`}>
+                <span className="ax-name">
+                  <ExchangeTag exchange={row.exchange} />
+                  {side ? <em className="ax-side">{side === "long" ? "Long here" : "Short here"}</em> : null}
+                </span>
+                <span className="t-num ax-rate">
+                  {pct(row.funding_rate * 100, 4, true)}
+                  <span className="t-muted"> /{row.funding_interval_hours}h</span>
+                </span>
+                <span className="t-num t-muted ax-meta">
+                  <Countdown target={row.next_funding_time} /> · {formatLeverage(row.max_leverage)} · OI {formatUsd(row.open_interest_usd)} · fee {pct(row.taker_fee_bps / 100, 3)}
+                </span>
+              </a>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="t-muted" style={{ fontSize: 13, marginTop: 8 }}>
+        {rows.length} exchanges list {opportunity.base_asset}. Click one to open it there.
+      </p>
     </>
   );
 }
@@ -152,7 +191,9 @@ export function DetailContent({
   onClose,
   exchangesQuery,
   captureFirst = false,
+  positions = [],
 }: {
+  positions?: TradeSessionResponse[];
   opportunity: ArbitrageOpportunity;
   scale: EdgeScale;
   horizonLabel: string;
@@ -161,6 +202,12 @@ export function DetailContent({
   captureFirst?: boolean;
 }) {
   const history = useHistory(opportunity.canonical_symbol);
+  const flags = riskFlags(opportunity);
+  const { comparison, loading: comparisonLoading } = useSymbolComparison(opportunity.canonical_symbol, [], "hold");
+  const exchangeRows = useMemo(
+    () => [...(comparison?.exchanges ?? [])].sort((a, b) => b.funding_rate / (b.funding_interval_hours || 8) - a.funding_rate / (a.funding_interval_hours || 8)),
+    [comparison],
+  );
   const profitable = opportunity.net_return_percent > 0;
   const perCycle = opportunity.spread_rate_hourly * opportunity.funding_interval_hours * 100;
   const notional = opportunity.reference_notional_usd;
@@ -174,11 +221,14 @@ export function DetailContent({
         <div>
           <h2>{opportunity.base_asset}</h2>
           <TrustBadge level={opportunity.trust_level} />
+          <RiskChips opportunity={opportunity} max={4} />
         </div>
         <button type="button" className="t-icon-btn" onClick={onClose} aria-label="Close details">
           {Icon.close}
         </button>
       </div>
+
+      <PositionNote trades={positions} symbol={opportunity.canonical_symbol} />
 
       {captureFirst && opportunity.capture ? (
         <>
@@ -205,6 +255,11 @@ export function DetailContent({
         </span>
       </div>
       <EdgeLine opportunity={opportunity} scale={scale} height={30} />
+
+      <div className="t-section">
+        <h3>All exchanges for {opportunity.base_asset}</h3>
+        <AllExchanges opportunity={opportunity} rows={exchangeRows} loading={comparisonLoading} />
+      </div>
 
       <div className="t-section">
         <div className="t-leg-grid">
@@ -246,12 +301,36 @@ export function DetailContent({
       </div>
 
       <div className="t-section">
+        <h3>Does this edge last?</h3>
+        <PersistenceBlock opportunity={opportunity} points={history} />
+      </div>
+
+      <div className="t-section">
         <h3>Spread history</h3>
         <Sparkline points={history} />
       </div>
 
       <div className="t-section">
-        <h3>Why this trust level</h3>
+        <h3>How often it has paid</h3>
+        <BacktestConfidence baseAsset={opportunity.base_asset} />
+      </div>
+
+      <div className="t-section">
+        <h3>How much you can trade</h3>
+        <DepthBlock symbol={opportunity.canonical_symbol} longExchange={opportunity.long_leg.exchange} shortExchange={opportunity.short_leg.exchange} />
+      </div>
+
+      <div className="t-section">
+        <h3>Funding rate history</h3>
+        <TrendBlock
+          symbol={opportunity.canonical_symbol}
+          exchanges={exchangeRows.length ? exchangeRows.map((row) => row.exchange) : [opportunity.long_leg.exchange, opportunity.short_leg.exchange]}
+          intervals={Object.fromEntries(exchangeRows.map((row) => [row.exchange, row.funding_interval_hours]))}
+        />
+      </div>
+
+      <div className="t-section">
+        <h3>Why this trust level{flags.length ? `, ${flags.length} to check` : ""}</h3>
         <ul className="t-checks">
           {opportunity.trust_checks.map((check) => (
             <li key={`${check.key}-${check.detail}`} className="t-check" data-status={check.status}>

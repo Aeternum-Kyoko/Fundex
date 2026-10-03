@@ -3,6 +3,13 @@ import type { ArbitrageOpportunity, ExchangeFundingLeaders, ExchangeStatus, Fund
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "/api";
 
+export interface RateRow {
+  exchange: string;
+  rate: number;
+  interval_hours: number;
+  next_funding_time: string | null;
+}
+
 export interface DashboardData {
   version: number;
   generated_at: string;
@@ -14,6 +21,7 @@ export interface DashboardData {
   opportunities: ArbitrageOpportunity[];
   leaders: ExchangeFundingLeaders[];
   settlements: FundingSettlementItem[];
+  rates?: Record<string, RateRow[]>;
 }
 
 export type LinkState = "live" | "polling" | "paused";

@@ -8,12 +8,17 @@ import { type SectionTab, AppChrome } from "./chrome";
 import { Dialog, downloadCsv, FeedsPanel, PulseStrip } from "./panels";
 import { useMediaQuery, usePref } from "./prefs";
 import { EdgeLine, type EdgeScale, EXCHANGE_SHORT, exchangeVar, hoursLabel, Icon, makeEdgeScale, nextPayout, pct, TrustBadge } from "./primitives";
+import { CalendarView } from "./calendar";
+import { HeatmapView } from "./heatmap";
+import { PositionsStrip, usePositions } from "./insights";
+import { SkeletonRows } from "./states";
+import { pairSparks, TrendsView, useFundingTrends } from "./trends";
 import { useDashboard } from "./useDashboard";
 import { AlertsView, Empty, LeadersView, SettlementsView, useAlerts } from "./views";
 import "./design.css";
 import "./legacy.css";
 
-type Tab = "pairs" | "leaders" | "settlements" | "alerts";
+type Tab = "pairs" | "leaders" | "heatmap" | "trends" | "calendar" | "settlements" | "alerts";
 type Filter = "all" | "profitable" | "trusted" | "alerting";
 type Strategy = "capture" | "hold";
 
@@ -149,6 +154,7 @@ export function Terminal() {
   const [scope, setScope] = usePref<string[]>("arbradar-scope-v2", []);
   const [paused, setPaused] = useState(false);
   const { data, error, link, receivedAt, refresh } = useDashboard(scope, paused);
+  const positions = usePositions();
   const [density, setDensity] = usePref<Density>("arbradar-density", "compact");
   // Default to how this desk is traded: in just before a settlement, out right after.
   const [strategy, setStrategy] = usePref<Strategy>("arbradar-strategy", "capture");
@@ -160,7 +166,7 @@ export function Terminal() {
   const [panel, setPanel] = useState<null | "feeds">(null);
   const [tab, setTab] = useState<Tab>(() => {
     const requested = new URLSearchParams(window.location.search).get("tab");
-    return requested === "leaders" || requested === "settlements" || requested === "alerts" ? requested : "pairs";
+    return requested === "leaders" || requested === "heatmap" || requested === "trends" || requested === "calendar" || requested === "settlements" || requested === "alerts" ? requested : "pairs";
   });
   const [filter, setFilter] = usePref<Filter>("arbradar-filter", "all");
   const [search, setSearch] = useState("");
@@ -212,6 +218,27 @@ export function Terminal() {
     });
     return captureMode ? sortCaptureRows(filtered as CaptureRow[], sort) : sortRows(filtered, sort);
   }, [opportunities, filter, deferredSearch, sort, alertSymbols, captureMode]);
+
+  // Spread trend for the first screenful of rows; one request, refreshed each minute.
+  const sparkRows = useMemo(() => (captureMode ? [] : rows.slice(0, 30)), [rows, captureMode]);
+  const sparkPairs = useMemo(
+    () =>
+      sparkRows.map((row) => ({
+        symbol: row.canonical_symbol,
+        long: row.long_leg.exchange,
+        short: row.short_leg.exchange,
+        longInterval: row.long_leg.funding_interval_hours ?? row.funding_interval_hours,
+        shortInterval: row.short_leg.funding_interval_hours ?? row.funding_interval_hours,
+      })),
+    [sparkRows],
+  );
+  const { series: sparkSeries } = useFundingTrends(
+    sparkPairs.map((pair) => pair.symbol),
+    useMemo(() => [...new Set(sparkPairs.flatMap((pair) => [pair.long, pair.short]))].sort(), [sparkPairs]),
+    60,
+    60_000,
+  );
+  const sparks = useMemo(() => pairSparks(sparkSeries, sparkPairs), [sparkSeries, sparkPairs]);
 
   const selectedRow = useMemo(() => opportunities.find((row) => row.canonical_symbol === selected) ?? null, [opportunities, selected]);
   const exchangesQuery = data?.selected_exchanges?.length ? `?exchanges=${encodeURIComponent(data.selected_exchanges.join(","))}` : "";
@@ -275,6 +302,7 @@ export function Terminal() {
       onClose={close}
       exchangesQuery={exchangesQuery}
       captureFirst={captureMode}
+      positions={positions}
     />
   ) : null;
 
@@ -325,7 +353,16 @@ export function Terminal() {
     >
       <div className="t-shell" data-detail={selectedRow && isWide ? "open" : "closed"}>
         <main className="t-main">
-          {error ? <div className="t-banner" role="alert">{error}</div> : null}
+          {error ? (
+            <div className="t-banner" role="alert">
+              {error}{" "}
+              <button type="button" className="t-text-btn" onClick={() => void refresh()}>
+                Retry
+              </button>
+            </div>
+          ) : null}
+
+          {tab === "pairs" ? <PositionsStrip trades={positions} opportunities={opportunities} onOpen={open} /> : null}
 
           {tab === "pairs" && data ? (
             captureMode ? (
@@ -352,6 +389,9 @@ export function Terminal() {
               [
                 ["pairs", "Pairs", opportunities.length],
                 ["leaders", "Funding leaders", null],
+                ["heatmap", "Heatmap", null],
+                ["trends", "Rate history", null],
+                ["calendar", "Calendar", null],
                 ["settlements", "Settlements", data?.settlements.length ?? null],
                 ["alerts", "Alerts", alertSymbols.size],
               ] as const
@@ -465,7 +505,7 @@ export function Terminal() {
                   </>
                 )
               ) : isPhone ? (
-                <PairCards rows={rows} scale={scale} selected={selected} onSelect={open} horizonLabel={horizonLabel} exchangesQuery={exchangesQuery} />
+                <PairCards rows={rows} scale={scale} selected={selected} onSelect={open} horizonLabel={horizonLabel} exchangesQuery={exchangesQuery} sparks={sparks} />
               ) : (
                 <>
                   <p className="t-footnote">
@@ -481,14 +521,22 @@ export function Terminal() {
                     sort={sort}
                     onSort={setSort}
                     density={isWide && selectedRow ? "compact" : density}
+                    sparks={sparks}
                   />
                 </>
               )}
             </>
           ) : null}
 
-          {tab === "leaders" ? <LeadersView leaders={data?.leaders ?? []} onOpen={open} /> : null}
-          {tab === "settlements" ? <SettlementsView items={data?.settlements ?? []} onOpen={open} /> : null}
+          {tab === "leaders" ? <LeadersView leaders={data?.leaders ?? []} onOpen={open} loading={!data} /> : null}
+          {tab === "heatmap" ? (
+            data ? <HeatmapView rates={data.rates ?? {}} exchanges={active} onOpen={open} /> : <SkeletonRows count={10} height={40} label="Loading heatmap" />
+          ) : null}
+          {tab === "calendar" ? (
+            data ? <CalendarView rates={data.rates ?? {}} exchanges={active} onOpen={open} /> : <SkeletonRows count={6} height={48} label="Loading calendar" />
+          ) : null}
+          {tab === "trends" ? <TrendsView opportunities={opportunities} leaders={data?.leaders ?? []} exchanges={active} onOpen={open} /> : null}
+          {tab === "settlements" ? <SettlementsView items={data?.settlements ?? []} onOpen={open} loading={!data} /> : null}
           {tab === "alerts" ? <AlertsView alerts={alerts} horizonLabel={horizonLabel} onOpen={open} /> : null}
         </main>
 

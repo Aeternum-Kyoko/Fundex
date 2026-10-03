@@ -1981,3 +1981,39 @@ a.cp-row:hover { background: var(--t-surface); }
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ---------- Rate history & leaders ---------- */
+
+.tr-plot { position: relative; border: 1px solid var(--t-line); border-radius: var(--t-radius-s, 8px); background: var(--t-bg-sunken, transparent); touch-action: pan-y; }
+.tr-plot svg { display: block; width: 100%; height: 100%; }
+.tr-line { fill: none; stroke-width: 2; stroke-linejoin: round; }
+.tr-zero { stroke: var(--t-line-strong); stroke-dasharray: 3 4; }
+.tr-cursor { stroke: var(--t-text-3); }
+.tr-axis { position: absolute; left: 6px; font-size: 11px; color: var(--t-text-3); pointer-events: none; }
+.tr-tip { position: absolute; top: 8px; display: grid; gap: 2px; padding: 8px 10px; border: 1px solid var(--t-line-strong); border-radius: 8px; background: var(--t-bg-raised); font-size: 12px; pointer-events: none; box-shadow: 0 6px 20px rgb(0 0 0 / 0.18); }
+.tr-tip i, .tr-legend i { display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 50%; }
+.tr-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 8px; font-size: 13px; }
+.tr-stats { margin-top: 14px; }
+.tr-stat-row { display: grid; grid-template-columns: minmax(0, 1.2fr) repeat(4, minmax(0, 1fr)); gap: 8px; padding: 8px 0; border-bottom: 1px solid color-mix(in srgb, var(--t-line) 60%, transparent); font-size: 14px; }
+.tr-stat-row:last-child { border-bottom: 0; }
+.tr-stat-head { color: var(--t-text-3); font-size: 12px; }
+.t-right { text-align: right; }
+
+.ld-row { display: grid !important; grid-template-columns: minmax(0, 1fr) auto !important; padding: 0 !important; }
+.ld-main { grid-template-columns: minmax(0, 1fr) auto !important; }
+.ld-meta { display: block; font-size: 12px; margin-top: 2px; }
+.ld-ext { height: 28px; font-size: 12px; text-decoration: none; }
+
+@media (max-width: 759px) {
+  .tr-stat-row { grid-template-columns: minmax(0, 1.2fr) repeat(2, minmax(0, 1fr)); }
+}
+
+/* ---------- All exchanges list (detail panel) ---------- */
+.ax-list { list-style: none; margin: 0; padding: 0; }
+.ax-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 9px 10px; border-bottom: 1px solid color-mix(in srgb, var(--t-line) 60%, transparent); color: inherit; text-decoration: none; font-size: 14px; }
+.ax-row:hover { background: var(--t-bg-raised); }
+.ax-row[data-side="long"], .ax-row[data-side="short"] { background: color-mix(in srgb, var(--t-receive-bg, transparent) 60%, transparent); }
+.ax-name { display: flex; align-items: center; gap: 8px; }
+.ax-side { font-style: normal; font-size: 12px; color: var(--t-text-2, var(--t-text)); }
+.ax-rate { text-align: right; }
+.ax-meta { grid-column: 1 / -1; font-size: 12px; }

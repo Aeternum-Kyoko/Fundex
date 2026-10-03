@@ -29,6 +29,7 @@ from app.services.arbitrage import build_opportunities
 from app.services.backtest import BacktestParams
 from app.services.execution import build_execution_plan, reverse_opportunity
 from app.services.funding_leaders import build_funding_leaders
+from app.services.liquidity import depth_profile
 from app.services.links import exchange_display_name, exchange_trade_url
 from app.services.opportunity_ranker import capture_opportunity, is_snapshot_usable
 
@@ -118,6 +119,23 @@ async def exchange_funding_trends(
     return FundingTrendsResponse(total_series=len(series), series=series)
 
 
+def _rate_matrix(snapshots: list) -> dict[str, list[dict]]:
+    """Every exchange's rate for each coin listed on two or more exchanges (heatmap and settlement calendar)."""
+    by_symbol: dict[str, list[dict]] = {}
+    for snapshot in snapshots:
+        if not is_snapshot_usable(snapshot):
+            continue
+        by_symbol.setdefault(snapshot.canonical_symbol, []).append(
+            {
+                "exchange": snapshot.exchange,
+                "rate": snapshot.funding_rate,
+                "interval_hours": snapshot.funding_interval_hours,
+                "next_funding_time": snapshot.next_funding_time.isoformat() if snapshot.next_funding_time else None,
+            }
+        )
+    return {symbol: rows for symbol, rows in by_symbol.items() if len(rows) >= 2}
+
+
 def _settlement_items(snapshots: list, limit: int) -> list[FundingSettlementItem]:
     now = datetime.now(timezone.utc)
     upcoming = sorted(
@@ -170,6 +188,7 @@ async def dashboard(request: Request, exchanges: str | None = None) -> dict:
         "opportunities": [opportunity.model_dump(mode="json") for opportunity in opportunities],
         "leaders": leaders.model_dump(mode="json")["exchanges"],
         "settlements": [item.model_dump(mode="json") for item in _settlement_items(snapshots, 40)],
+        "rates": _rate_matrix(snapshots),
     }
 
 
@@ -203,6 +222,30 @@ async def opportunity_history(request: Request, canonical_symbol: str, limit: in
     resolved_limit = limit or request.app.state.settings.default_history_limit
     points = await request.app.state.history_store.get_opportunity_history(canonical_symbol, resolved_limit)
     return OpportunityHistoryResponse(canonical_symbol=canonical_symbol, total=len(points), points=points)
+
+
+@router.get("/symbols/{canonical_symbol}/depth")
+async def symbol_depth(request: Request, canonical_symbol: str, exchanges: str | None = None) -> dict:
+    """Live order-book slippage by trade size on each exchange, and the largest size under 0.1% impact."""
+    context = request.app.state.market_engine.ranking_context
+    if context.liquidity is None:
+        raise HTTPException(status_code=503, detail="Order-book depth is not available.")
+    selected = _resolved_exchanges(request, exchanges)
+    snapshots = [s for s in await _snapshots_for_exchanges(request, selected) if s.canonical_symbol == canonical_symbol]
+    fetcher = context.liquidity._fetcher  # noqa: SLF001
+
+    async def one(snapshot) -> dict | None:
+        try:
+            book = await asyncio.wait_for(fetcher.fetch(snapshot.exchange, snapshot.exchange_symbol), timeout=12)
+        except Exception:
+            return None
+        profile = depth_profile(book[0], book[1]) if book else None
+        if profile is None:
+            return None
+        return {"exchange": snapshot.exchange, "display_name": exchange_display_name(snapshot.exchange), **profile}
+
+    results = await asyncio.gather(*(one(snapshot) for snapshot in snapshots))
+    return {"canonical_symbol": canonical_symbol, "exchanges": [row for row in results if row]}
 
 
 @router.get("/symbols/{canonical_symbol}/comparison", response_model=SymbolComparisonResponse)

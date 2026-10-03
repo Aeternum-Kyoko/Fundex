@@ -6,6 +6,7 @@ import { formatLeverage, formatPrice, formatUsd, getExchangeTrustBadge } from ".
 import type { SymbolComparisonExchangeSnapshot } from "../lib/types";
 import { CaptureBlock, type CaptureRow, dollars, whoPays } from "./capture";
 import { tradeHref } from "./pairs";
+import { TrendBlock } from "./trends";
 import { Countdown, EXCHANGE_SHORT, hoursLabel, Icon, pct, TrustBadge } from "./primitives";
 import "./design.css";
 
@@ -173,6 +174,17 @@ export function ComparePage({ canonicalSymbol }: { canonicalSymbol: string }) {
         <section className="t-panel td-section" style={{ marginTop: 16 }}>
           <h3>Where every exchange sits, per hour</h3>
           <ExchangeAxis rows={rows} />
+        </section>
+      ) : null}
+
+      {rows.length ? (
+        <section className="t-panel td-section" style={{ marginTop: 16 }}>
+          <h3>Funding rate history</h3>
+          <TrendBlock
+            symbol={canonicalSymbol}
+            exchanges={rows.map((row) => row.exchange)}
+            intervals={Object.fromEntries(rows.map((row) => [row.exchange, row.funding_interval_hours]))}
+          />
         </section>
       ) : null}
 

@@ -1,0 +1,25 @@
+{
+  "name": "Fundex: funding rate arbitrage",
+  "short_name": "Fundex",
+  "description": "Live funding-rate arbitrage across Binance, Delta, CoinDCX, WazirX and CoinSwitch, with paper trading.",
+  "id": "/",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#0d1b22",
+  "theme_color": "#0d1b22",
+  "categories": ["finance", "productivity"],
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Best pairs", "url": "/", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Funding heatmap", "url": "/?tab=heatmap" },
+    { "name": "Settlement calendar", "url": "/?tab=calendar" },
+    { "name": "Trade desk", "url": "/trade" }
+  ]
+}

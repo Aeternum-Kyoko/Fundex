@@ -1,0 +1,83 @@
+/* Insight sections: risk chips, persistence, backtest, depth, positions, heatmap, calendar, sparklines. */
+
+.sp { display: inline-block; vertical-align: middle; overflow: visible; }
+.sp path { fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; stroke: var(--t-text-3); }
+.sp[data-dir="up"] path { stroke: var(--t-receive); }
+.sp[data-dir="down"] path { stroke: var(--t-pay); }
+.sp-empty { display: inline-block; }
+.t-spread-cell { display: inline-flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.ld-rate { display: inline-flex; align-items: center; gap: 10px; }
+
+.rk-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.rk-chip { padding: 1px 7px; border-radius: 999px; font-size: 11.5px; font-weight: 500; line-height: 1.5; white-space: nowrap; background: var(--t-surface-2); color: var(--t-text-2); }
+.rk-chip[data-tone="warn"] { background: var(--t-amber-bg); color: var(--t-amber); }
+.rk-chip[data-tone="fail"] { background: var(--t-pay-bg); color: var(--t-pay); }
+
+.ps-verdict { margin: 0 0 4px; font-weight: 600; }
+.ps-verdict[data-tone="good"] { color: var(--t-receive); }
+.ps-verdict[data-tone="mid"] { color: var(--t-amber); }
+.ps-verdict[data-tone="bad"] { color: var(--t-pay); }
+.ps-line { margin: 0 0 10px; }
+
+.bt-line { margin: 0; }
+.bt-bar { height: 6px; margin-top: 8px; border-radius: 99px; background: var(--t-surface-2); overflow: hidden; }
+.bt-bar i { display: block; height: 100%; border-radius: inherit; background: var(--t-receive); }
+
+.dp-headline { margin: 0 0 10px; }
+.dp-grid { display: grid; gap: 4px; align-items: center; }
+.dp-head { color: var(--t-text-3); font-size: 11.5px; text-align: center; }
+.dp-head:first-child { text-align: left; }
+.dp-name { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 13px; }
+.dp-name em { font-style: normal; font-size: 11px; color: var(--t-text-3); }
+.dp-cell { padding: 5px 0; border-radius: 8px; text-align: center; font-size: 12.5px; background: var(--t-surface-2); color: var(--t-text-2); }
+.dp-cell[data-tone="good"] { background: var(--t-receive-bg); color: var(--t-receive); }
+.dp-cell[data-tone="ok"] { background: color-mix(in srgb, var(--t-receive) 8%, transparent); color: var(--t-text); }
+.dp-cell[data-tone="warn"] { background: var(--t-amber-bg); color: var(--t-amber); }
+.dp-cell[data-tone="bad"] { background: var(--t-pay-bg); color: var(--t-pay); }
+.dp-cell[data-tone="none"] { opacity: 0.5; }
+
+.ps-positions { margin-bottom: 16px; }
+.ps-pos-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); gap: 10px; }
+.ps-pos { display: grid; gap: 6px; padding: 12px 14px; border: 1px solid var(--t-line); border-radius: var(--t-radius-m); background: var(--t-bg-raised); text-align: left; cursor: pointer; }
+.ps-pos[data-warn="true"] { border-color: var(--t-amber); background: var(--t-amber-bg); }
+.ps-pos-top { display: flex; align-items: baseline; gap: 8px; }
+.ps-pos-mode { padding: 0 7px; border-radius: 99px; background: var(--t-surface-2); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em; }
+.ps-pos-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 13px; color: var(--t-text-2); }
+.ps-pos-warn { font-size: 13px; font-weight: 500; color: var(--t-amber); }
+.ps-note { margin: 0 0 14px; padding: 10px 12px; border-radius: 12px; background: var(--t-receive-bg); font-size: 14px; }
+
+.hm-scroll { overflow-x: auto; margin: 0 -16px; padding: 0 16px; }
+.hm-grid { display: grid; gap: 3px; min-width: 520px; align-items: stretch; }
+.hm-head { padding: 4px 6px; font-size: 12px; font-weight: 600; text-align: center; }
+.hm-right { text-align: right; }
+.hm-sticky { position: sticky; left: 0; z-index: 1; background: var(--t-bg-raised); text-align: left; }
+.hm-coin { padding: 8px 6px; border: 0; font-weight: 600; cursor: pointer; border-radius: 8px; }
+.hm-cell { padding: 8px 4px; border: 0; border-radius: 8px; text-align: center; font-size: 12.5px; background: var(--t-surface-2); cursor: pointer; color: var(--t-text); }
+.hm-empty { opacity: 0.35; cursor: default; }
+.hm-gap { background: none; cursor: default; text-align: right; color: var(--t-text-2); }
+.hm-cell[data-edge="short"] { outline: 2px solid var(--t-receive); outline-offset: -2px; }
+.hm-cell[data-edge="long"] { outline: 2px solid var(--t-pay); outline-offset: -2px; }
+
+.cal-lanes { display: grid; gap: 10px; margin-top: 14px; }
+.cal-lane, .cal-axis { display: grid; grid-template-columns: 78px minmax(0, 1fr); align-items: center; gap: 10px; }
+.cal-name { font-size: 13px; font-weight: 600; }
+.cal-track { position: relative; height: 30px; border-radius: 99px; background: var(--t-surface-2); }
+.cal-dot { position: absolute; top: 50%; border: 0; border-radius: 50%; transform: translate(-50%, -50%); opacity: 0.85; cursor: pointer; transition: transform 0.2s var(--t-ease), opacity 0.2s; }
+.cal-dot:hover, .cal-dot[data-active="true"] { opacity: 1; transform: translate(-50%, -50%) scale(1.25); box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 0%, var(--t-bg-raised)), 0 0 0 5px var(--t-text-3); }
+.cal-ticks { height: 18px; background: none; }
+.cal-ticks span { position: absolute; top: 0; transform: translateX(-50%); font-size: 11px; color: var(--t-text-3); }
+
+.t-skel-stack { display: grid; }
+.t-skel-line { height: 14px; margin: 12px 0; border-radius: 6px; border-bottom: 0; }
+
+.ln-page { max-width: 820px; }
+.ln-section h2 { margin: 0 0 8px; font-size: 19px; letter-spacing: -0.02em; }
+.ln-section p { margin: 0 0 10px; line-height: 1.6; }
+.ln-flow { width: 100%; height: auto; margin-top: 8px; }
+.ln-defs { display: grid; gap: 14px; margin: 0; }
+.ln-defs dt { font-weight: 600; }
+.ln-defs dd { margin: 2px 0 0; color: var(--t-text-2); line-height: 1.55; }
+.ln-trust, .ln-list { margin: 0 0 10px; padding-left: 20px; line-height: 1.6; }
+.ln-trust { list-style: none; padding: 0; display: grid; gap: 10px; }
+.ln-trust li { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; }
+.ln-steps { margin: 0; padding-left: 22px; line-height: 1.8; }

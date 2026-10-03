@@ -9,6 +9,7 @@ const ComparePage = lazy(() => import("./terminal/ComparePage").then((module) =>
 const SymbolTradePage = lazy(() => import("./pages/SymbolTradePage").then((module) => ({ default: module.SymbolTradePage })));
 const Performance = lazy(() => import("./terminal/Performance").then((module) => ({ default: module.Performance })));
 const Backtest = lazy(() => import("./terminal/Backtest").then((module) => ({ default: module.Backtest })));
+const Learn = lazy(() => import("./terminal/Learn").then((module) => ({ default: module.Learn })));
 const TradeHub = lazy(() => import("./terminal/TradeHub").then((module) => ({ default: module.TradeHub })));
 
 function resolveRoute() {
@@ -18,6 +19,13 @@ function resolveRoute() {
     return (
       <PageFrame active="compare">
         <ComparePage key={pathname} canonicalSymbol={canonicalSymbol} />
+      </PageFrame>
+    );
+  }
+  if (pathname === "/learn") {
+    return (
+      <PageFrame active="compare">
+        <Learn />
       </PageFrame>
     );
   }
@@ -59,3 +67,10 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     <Suspense fallback={<div className="t-app" style={{ minHeight: "100vh" }} />}>{resolveRoute()}</Suspense>
   </React.StrictMode>,
 );
+
+// Offline-capable shell, so Fundex opens instantly once installed. Live data is never cached.
+if ("serviceWorker" in navigator && import.meta.env.PROD) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+  });
+}

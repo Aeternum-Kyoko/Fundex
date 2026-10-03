@@ -1,0 +1,91 @@
+/* Apple-style refinement layer: system type, glass bars, hairlines, spring motion, safe areas.
+   Loaded last so it only adjusts the look; layout and colour meaning come from design.css. */
+
+:root {
+  --t-font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, "Segoe UI", sans-serif;
+  --t-font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", system-ui, sans-serif;
+  --t-radius-s: 10px;
+  --t-radius-m: 16px;
+  --t-radius-l: 26px;
+  --t-spring: cubic-bezier(0.32, 1.28, 0.5, 1);
+  --t-hair: 1px;
+  --t-glass-blur: blur(26px) saturate(1.8);
+}
+
+html { background: var(--t-bg); -webkit-text-size-adjust: 100%; text-size-adjust: 100%; overscroll-behavior-y: none; }
+body { background: var(--t-bg); }
+
+.t-app {
+  font-family: var(--t-font-ui);
+  letter-spacing: -0.011em;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
+
+.t-app h1, .t-app h2, .t-app .td-title, .t-app .t-best-title, .t-app .t-brand { font-family: var(--t-font-display); letter-spacing: -0.024em; }
+.t-app .td-title { font-size: clamp(30px, 5vw, 40px); font-weight: 700; line-height: 1.08; letter-spacing: -0.032em; }
+.t-app .t-num { letter-spacing: -0.01em; }
+
+/* Glass bars */
+.t-app .t-topbar, .t-app .t-dock {
+  background: color-mix(in srgb, var(--t-bg) 68%, transparent);
+  -webkit-backdrop-filter: var(--t-glass-blur);
+  backdrop-filter: var(--t-glass-blur);
+  border-color: color-mix(in srgb, var(--t-line) 70%, transparent);
+}
+
+/* Surfaces: soft cards, hairline borders */
+.t-app .t-panel, .t-app .t-best-card, .t-app .t-card, .t-app .ps-pos {
+  border-color: color-mix(in srgb, var(--t-line) 75%, transparent);
+  border-radius: var(--t-radius-m);
+  box-shadow: 0 1px 0 color-mix(in srgb, #fff 4%, transparent) inset, 0 8px 28px -18px rgb(0 0 0 / 0.5);
+}
+
+/* Controls */
+.t-app .t-btn, .t-app .t-text-btn, .t-app .t-icon-btn, .t-app .t-chip, .t-app .t-tab, .t-app .t-more-item, .t-app .ps-pos, .t-app .hm-cell, .t-app .cal-dot {
+  transition: transform 0.28s var(--t-spring), background-color 0.2s, opacity 0.2s, box-shadow 0.2s;
+  -webkit-touch-callout: none;
+}
+.t-app .t-btn:active, .t-app .t-text-btn:active, .t-app .t-icon-btn:active, .t-app .t-chip:active, .t-app .t-more-item:active, .t-app .ps-pos:active { transform: scale(0.96); }
+.t-app .t-btn { border-radius: 12px; font-weight: 600; }
+.t-app .t-btn[data-primary="true"] { box-shadow: 0 6px 18px -8px var(--t-amber); }
+
+/* iOS segmented control: a raised thumb on a recessed track */
+.t-app .t-segmented { padding: 2px; border-radius: 11px; background: var(--t-surface-2); border: 0; gap: 2px; }
+.t-app .t-segmented button { border-radius: 9px; border: 0; transition: background-color 0.25s var(--t-ease), box-shadow 0.25s var(--t-ease), color 0.2s; }
+.t-app .t-segmented button[aria-pressed="true"] { background: var(--t-surface); color: var(--t-text); box-shadow: 0 1px 3px rgb(0 0 0 / 0.28), 0 0 0 0.5px color-mix(in srgb, var(--t-line-strong) 70%, transparent); }
+
+/* Sheets and dialogs: big radii, soft lift */
+.t-app .t-sheet { border-radius: 28px 28px 0 0; -webkit-backdrop-filter: var(--t-glass-blur); backdrop-filter: var(--t-glass-blur); }
+.t-app .t-sheet-scrim { -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+
+/* Focus: a soft ring, not a hard outline */
+.t-app :focus-visible { outline: 0; box-shadow: 0 0 0 3px color-mix(in srgb, var(--t-focus) 55%, transparent); border-radius: 10px; }
+
+/* Thin, quiet scrollbars */
+.t-app * { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--t-text-3) 50%, transparent) transparent; }
+
+/* Phones: 44pt tap targets, the dock lifted and rounded like a tab bar */
+@media (max-width: 759px) {
+  .t-app .t-icon-btn { min-width: 44px; min-height: 44px; }
+  .t-app .t-tab { min-height: 44px; }
+  .t-app .t-dock a, .t-app .t-dock button { min-height: 50px; transition: transform 0.28s var(--t-spring), color 0.2s; }
+  .t-app .t-dock a:active, .t-app .t-dock button:active { transform: scale(0.9); }
+}
+
+/* Installed app: no browser chrome, so respect the notch and home indicator. */
+@media (display-mode: standalone) {
+  .t-app { padding-bottom: 0; user-select: none; -webkit-user-select: none; }
+  .t-app input, .t-app select, .t-app .t-num, .t-app p { user-select: text; -webkit-user-select: text; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .t-app *, .t-app *::before, .t-app *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}
+
+@media (prefers-contrast: more) {
+  .t-app { --t-line: var(--t-line-strong); }
+}

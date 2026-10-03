@@ -477,24 +477,28 @@ class HistoryStore:
             return []
 
         with self._connect() as connection:
+            # Newest `limit` rows per coin and exchange, cut inside SQLite so wide requests stay cheap.
             rows = connection.execute(
                 f"""
-                SELECT exchange_name, canonical_symbol, funding_rate, fetched_at
-                FROM funding_snapshots
-                WHERE canonical_symbol IN ({",".join("?" for _ in symbols)})
-                  AND exchange_name IN ({",".join("?" for _ in exchanges)})
+                SELECT exchange_name, canonical_symbol, funding_rate, fetched_at FROM (
+                    SELECT exchange_name, canonical_symbol, funding_rate, fetched_at,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY canonical_symbol, exchange_name ORDER BY fetched_at DESC
+                           ) AS rank_in_series
+                    FROM funding_snapshots
+                    WHERE canonical_symbol IN ({",".join("?" for _ in symbols)})
+                      AND exchange_name IN ({",".join("?" for _ in exchanges)})
+                )
+                WHERE rank_in_series <= ?
                 ORDER BY fetched_at DESC
                 """,
-                [*symbols, *exchanges],
+                [*symbols, *exchanges, limit],
             ).fetchall()
 
         grouped: dict[tuple[str, str], list[FundingTrendPoint]] = {}
         for row in rows:
             key = (row["canonical_symbol"], row["exchange_name"])
-            points = grouped.setdefault(key, [])
-            if len(points) >= limit:
-                continue
-            points.append(
+            grouped.setdefault(key, []).append(
                 FundingTrendPoint(
                     recorded_at=row["fetched_at"],
                     funding_rate=row["funding_rate"],

@@ -56,6 +56,19 @@ class HistoryStoreRetentionTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(int(stats["opportunity_history_deleted"]), 1)
         self.assertGreaterEqual(int(stats["telegram_alert_state_deleted"]), 1)
 
+    async def test_funding_trends_keep_newest_points_per_series(self) -> None:
+        now = datetime.now(timezone.utc)
+        await self.store.save_snapshots(
+            [make_snapshot(exchange="binance", fetched_at=now - timedelta(minutes=minute)) for minute in range(10)]
+            + [make_snapshot(exchange="delta", fetched_at=now - timedelta(minutes=minute)) for minute in range(3)]
+        )
+        series = await self.store.get_funding_trends(["BTC-USDT-PERP"], ["binance", "delta"], 4)
+        by_exchange = {entry.exchange: entry.points for entry in series}
+        self.assertEqual(len(by_exchange["binance"]), 4)
+        self.assertEqual(len(by_exchange["delta"]), 3)
+        times = [point.recorded_at for point in by_exchange["binance"]]
+        self.assertEqual(times, sorted(times))
+
     async def test_daily_summary_state_round_trip(self) -> None:
         await self.store.mark_daily_summary_sent("2026-04-09")
 

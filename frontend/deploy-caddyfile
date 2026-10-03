@@ -9,6 +9,12 @@
 		}
 	}
 
+	# The service worker and manifest must never be served stale, or updates won't reach installed copies.
+	@shell path /sw.js /manifest.webmanifest
+	header @shell Cache-Control "no-cache"
+	@hashed path /assets/*
+	header @hashed Cache-Control "public, max-age=31536000, immutable"
+
 	# Everything else is the single-page app.
 	handle {
 		root * /srv

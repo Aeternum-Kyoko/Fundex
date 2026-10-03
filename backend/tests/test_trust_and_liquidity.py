@@ -230,3 +230,17 @@ class BinanceProbeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_depth_profile_reports_impact_by_size_and_max_size():
+    from app.services.liquidity import depth_profile
+
+    asks = [(100.0 + i * 0.01, 50.0) for i in range(40)]
+    bids = [(99.99 - i * 0.01, 50.0) for i in range(40)]
+    profile = depth_profile(bids, asks)
+    assert profile is not None
+    sizes = profile["sizes"]
+    assert sizes[0]["buy_percent"] is not None
+    assert sizes[0]["buy_percent"] <= sizes[3]["buy_percent"]
+    assert 0 < profile["max_size_usd"] < 40 * 50 * 100
+    assert depth_profile([], asks) is None

@@ -102,6 +102,20 @@ def simulate(series: list[CoinSeries], params: BacktestParams, start: int, end: 
         entry["net_usd"] += net / 100 * notional
         entry["best_gross_percent"] = max(entry["best_gross_percent"], gross)
 
+    # Every coin, not just the top few: how often its next-settlement capture would have paid after costs.
+    seen: dict[str, int] = {}
+    for _, coin, _, _, _ in captures:
+        seen[coin] = seen.get(coin, 0) + 1
+    coin_stats: dict[str, dict] = {}
+    for coin, count in seen.items():
+        coin_trades = [t for t in trades if t[1] == coin]
+        coin_stats[coin] = {
+            "settlements": count,
+            "paid": len(coin_trades),
+            "hit_rate": len(coin_trades) / count if count else 0.0,
+            "avg_net_percent": sum(t[3] for t in coin_trades) / len(coin_trades) if coin_trades else 0.0,
+        }
+
     grid = []
     for bps in FEE_GRID_BPS:
         row = []
@@ -139,6 +153,7 @@ def simulate(series: list[CoinSeries], params: BacktestParams, start: int, end: 
         "per_month_usd": total / 100 * notional / days * 30,
         "daily": [{"day": day, "net_usd": value} for day, value in sorted(daily.items())],
         "by_coin": sorted(by_coin.values(), key=lambda item: -item["net_usd"])[:12],
+        "coin_stats": coin_stats,
         "best_trades": [
             {
                 "at": datetime.fromtimestamp(moment, timezone.utc).isoformat(),
