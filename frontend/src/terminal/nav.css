@@ -95,3 +95,28 @@
   .t-app .t-main { padding-bottom: calc(var(--t-dock-h) + var(--t-safe-b) + 16px); }
 }
 @keyframes dock-pop { from { opacity: 0; transform: scale(0.82); } }
+
+/* Top-bar extras: Compare and How it works live in the bar on a laptop, so More can stay short. */
+.t-app .t-nav button.t-nav-extra, .t-app .t-nav a.t-nav-extra { display: inline-flex; align-items: center; gap: 7px; padding: 7px 13px; border: 0; border-radius: 10px; background: none; color: var(--t-text-2); font-size: 14px; font-weight: 550; cursor: pointer; text-decoration: none; transition: background-color 0.22s var(--t-ease), color 0.2s; }
+.t-app .t-nav .t-nav-extra svg { width: 16px; height: 16px; opacity: 0.8; }
+.t-app .t-nav .t-nav-extra:hover { color: var(--t-text); background: color-mix(in srgb, var(--t-surface) 60%, transparent); }
+.t-app .t-nav .t-nav-extra[aria-current="page"] { color: var(--t-text); background: var(--t-surface); box-shadow: 0 1px 3px rgb(0 0 0 / 0.3); }
+/* Tight laptops: icons only for the extras until there is room for words. */
+@media (max-width: 1399px) { .t-app .t-nav .t-nav-extra span { display: none; } .t-app .t-nav .t-nav-extra { padding: 7px 10px; } }
+
+/* Exchange health section */
+.hl-wrap { display: grid; gap: 14px; }
+.hl-summary { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 24px; }
+.hl-big { font-size: 22px; letter-spacing: -0.02em; }
+.hl-link { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--t-text-2); }
+.hl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 12px; }
+.hl-card[data-state="down"] { border-color: color-mix(in srgb, var(--t-pay) 60%, var(--t-line)); }
+.hl-card[data-state="degraded"] { border-color: color-mix(in srgb, var(--t-amber) 60%, var(--t-line)); }
+.hl-card[data-state="off"] { opacity: 0.7; }
+.hl-name { display: inline-flex; align-items: center; gap: 8px; }
+.hl-pill { padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--t-receive-bg); color: var(--t-receive); }
+.hl-pill[data-state="degraded"] { background: var(--t-amber-bg); color: var(--t-amber); }
+.hl-pill[data-state="down"] { background: var(--t-pay-bg); color: var(--t-pay); }
+.hl-pill[data-state="off"] { background: var(--t-surface-2); color: var(--t-text-3); }
+.hl-error { margin: 10px 0 0; padding: 8px 10px; border-radius: 10px; background: var(--t-pay-bg); color: var(--t-pay); font-size: 13px; word-break: break-word; }
+.hl-note { margin: 10px 0 0; font-size: 13px; }

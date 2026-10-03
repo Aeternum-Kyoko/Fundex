@@ -24,7 +24,7 @@ function resolveRoute() {
   }
   if (pathname === "/learn") {
     return (
-      <PageFrame active="compare">
+      <PageFrame active="learn">
         <Learn />
       </PageFrame>
     );

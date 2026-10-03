@@ -2,6 +2,7 @@ import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { AdminPanel } from "../components/AdminPanel";
 import type { ExchangeStatus } from "../lib/types";
 import { CommandPalette } from "./palette";
+import { useMediaQuery } from "./prefs";
 import { CompareDialog, Dialog, FeedsPanel } from "./panels";
 import { BrandMark, Icon } from "./primitives";
 import "./design.css";
@@ -11,8 +12,8 @@ import "./apple.css";
 import "./nav.css";
 
 export type NavKey = "dashboard" | "trade" | "results" | "backtest";
-export type ActiveKey = NavKey | "compare";
-export type SectionTab = "leaders" | "heatmap" | "trends" | "calendar" | "settlements" | "alerts";
+export type ActiveKey = NavKey | "compare" | "learn";
+export type SectionTab = "health" | "leaders" | "heatmap" | "trends" | "calendar" | "settlements" | "alerts";
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "/api";
 const THEME_KEY = "arbradar-theme";
@@ -123,6 +124,7 @@ export function AppChrome({ active, children, topMiddle, topActions, hideBrandTe
   const [panel, setPanel] = useState<null | "more" | "compare" | "ios" | "jump">(null);
   const [scrolled, setScrolled] = useState(false);
   const install = useInstall();
+  const wide = useMediaQuery("(min-width: 1100px)");
   const [adminOpen, setAdminOpen] = useState(false);
   const [statuses, setStatuses] = useState<ExchangeStatus[]>([]);
   const closePanel = useCallback(() => setPanel(null), []);
@@ -175,6 +177,7 @@ export function AppChrome({ active, children, topMiddle, topActions, hideBrandTe
 
   const items: MoreItem[] = [
     { label: "Compare a coin", description: "Every exchange side by side for one coin", onClick: () => setPanel("compare") },
+    sectionItem("health", "Exchange health", "Feed status for every exchange"),
     sectionItem("leaders", "Funding leaders", "Highest and lowest rates on each exchange"),
     sectionItem("heatmap", "Funding heatmap", "Every coin and exchange, coloured by rate"),
     sectionItem("trends", "Rate history", "How funding rates moved on each exchange"),
@@ -191,6 +194,12 @@ export function AppChrome({ active, children, topMiddle, topActions, hideBrandTe
     { label: theme === "dark" ? "Light theme" : "Dark theme", description: "Switch the look", onClick: () => setTheme(theme === "dark" ? "light" : "dark") },
     { label: "Exchange API keys", description: "Admin: fee tier and CoinSwitch access", onClick: () => { closePanel(); setAdminOpen(true); } },
   ];
+
+  // On a laptop the top bar already carries Compare and How it works, and the dashboard tabs carry the sections,
+  // so More keeps only what has no other home.
+  const sectionLabels = new Set(["Exchange health", "Funding leaders", "Funding heatmap", "Rate history", "Settlement calendar", "Settlements", "Alerts"]);
+  const hiddenOnWide = new Set(["Compare a coin", "How Fundex works", ...(onSection ? sectionLabels : [])]);
+  const moreItems = wide ? items.filter((item) => !hiddenOnWide.has(item.label)) : items;
 
   const renderItem = (item: MoreItem) =>
     item.href ? (
@@ -219,6 +228,14 @@ export function AppChrome({ active, children, topMiddle, topActions, hideBrandTe
               <span>{item.label}</span>
             </a>
           ))}
+          <button type="button" className="t-nav-extra" onClick={() => setPanel("compare")}>
+            {Icon.leaders}
+            <span>Compare</span>
+          </button>
+          <a className="t-nav-extra" href="/learn" aria-current={active === "learn" ? "page" : undefined}>
+            {Icon.help}
+            <span>How it works</span>
+          </a>
         </nav>
         {topMiddle}
         <div className="t-topbar-actions">
@@ -254,7 +271,7 @@ export function AppChrome({ active, children, topMiddle, topActions, hideBrandTe
 
       {panel === "more" ? (
         <Dialog title="More" onClose={closePanel}>
-          <div className="t-more">{items.map(renderItem)}</div>
+          <div className="t-more">{moreItems.map(renderItem)}</div>
           {moreExtras.length ? (
             <>
               <h3 className="t-subhead" style={{ marginTop: 18 }}>

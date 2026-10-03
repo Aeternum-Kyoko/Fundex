@@ -1,14 +1,14 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import type { ArbitrageOpportunity, ExchangeStatus, TrustLevel } from "../lib/types";
-import { useClock } from "./clock";
+import type { ArbitrageOpportunity, TrustLevel } from "../lib/types";
 import { DetailContent, DetailSheet } from "./detail";
 import { type Density, PairCards, PairTable, type SortKey } from "./pairs";
 import { CaptureCards, CapturePicks, type CaptureRow, CaptureTable } from "./capture";
 import { type SectionTab, AppChrome } from "./chrome";
-import { Dialog, downloadCsv, FeedsPanel, PulseStrip } from "./panels";
+import { downloadCsv, PulseStrip } from "./panels";
 import { useMediaQuery, usePref } from "./prefs";
 import { EdgeLine, type EdgeScale, EXCHANGE_SHORT, exchangeVar, hoursLabel, Icon, makeEdgeScale, nextPayout, pct, TrustBadge } from "./primitives";
 import { CalendarView } from "./calendar";
+import { HealthView, useUnhealthyCount } from "./health";
 import { HeatmapView } from "./heatmap";
 import { PositionsStrip, usePositions } from "./insights";
 import { SkeletonRows } from "./states";
@@ -18,7 +18,7 @@ import { AlertsView, Empty, LeadersView, SettlementsView, useAlerts } from "./vi
 import "./design.css";
 import "./legacy.css";
 
-type Tab = "pairs" | "leaders" | "heatmap" | "trends" | "calendar" | "settlements" | "alerts";
+type Tab = "pairs" | "leaders" | "heatmap" | "trends" | "calendar" | "settlements" | "alerts" | "health";
 type Filter = "all" | "profitable" | "trusted" | "alerting";
 type Strategy = "capture" | "hold";
 
@@ -55,44 +55,6 @@ function sortRows(rows: ArbitrageOpportunity[], sort: SortKey) {
     oi: (a: ArbitrageOpportunity, b: ArbitrageOpportunity) => (b.combined_open_interest_usd ?? 0) - (a.combined_open_interest_usd ?? 0),
   }[sort];
   return sorted.sort(by);
-}
-
-function healthState(status: ExchangeStatus, now: number): "ok" | "degraded" | "down" | "off" {
-  if (!status.enabled || !status.configured) return "off";
-  if (!status.last_success_at) return status.last_error ? "down" : "degraded";
-  const age = (now - new Date(status.last_success_at).getTime()) / 1000;
-  if (status.last_error || age > 180) return "down";
-  if (!status.healthy || age > 60) return "degraded";
-  return "ok";
-}
-
-function HealthStrip({ statuses, link, onOpen }: { statuses: ExchangeStatus[]; link: string; onOpen: () => void }) {
-  const now = useClock();
-  return (
-    <button type="button" className="t-health" aria-label="Exchange feeds: open details" onClick={onOpen}>
-      {statuses
-        .filter((status) => status.enabled)
-        .map((status) => {
-          const state = healthState(status, now);
-          const age = status.last_success_at ? Math.max(0, Math.round((now - new Date(status.last_success_at).getTime()) / 1000)) : null;
-          return (
-            <span
-              key={status.exchange}
-              className="t-health-pill"
-              title={`${status.display_name}: ${status.last_error ?? (age != null ? `updated ${age}s ago, ${status.snapshot_count} contracts` : "waiting for first update")}`}
-            >
-              <span className="t-dot" data-state={state === "ok" ? undefined : state} style={state === "ok" ? { background: `var(--x-${status.exchange})` } : undefined} />
-              <span>{EXCHANGE_SHORT[status.exchange] ?? status.display_name}</span>
-              <span className="t-num t-muted">{age != null ? `${age}s` : "…"}</span>
-            </span>
-          );
-        })}
-      <span className="t-health-pill" title={link === "live" ? "Live updates connected" : "Live updates unavailable; refreshing every 8 seconds"}>
-        <span className="t-dot" data-state={link === "live" ? undefined : link === "paused" ? "off" : "degraded"} />
-        <span>{link === "live" ? "Live" : link === "paused" ? "Paused" : "Polling"}</span>
-      </span>
-    </button>
-  );
 }
 
 function BestPicks({
@@ -155,6 +117,7 @@ export function Terminal() {
   const [paused, setPaused] = useState(false);
   const { data, error, link, receivedAt, refresh } = useDashboard(scope, paused);
   const positions = usePositions();
+  const unhealthy = useUnhealthyCount(data?.statuses ?? []);
   const [density, setDensity] = usePref<Density>("arbradar-density", "compact");
   // Default to how this desk is traded: in just before a settlement, out right after.
   const [strategy, setStrategy] = usePref<Strategy>("arbradar-strategy", "capture");
@@ -163,10 +126,9 @@ export function Terminal() {
   const [captureSort, setCaptureSort] = usePref<SortKey>("arbradar-sort-capture", "next");
   const sort = strategy === "capture" ? captureSort : holdSort;
   const setSort = strategy === "capture" ? setCaptureSort : setHoldSort;
-  const [panel, setPanel] = useState<null | "feeds">(null);
   const [tab, setTab] = useState<Tab>(() => {
     const requested = new URLSearchParams(window.location.search).get("tab");
-    return requested === "leaders" || requested === "heatmap" || requested === "trends" || requested === "calendar" || requested === "settlements" || requested === "alerts" ? requested : "pairs";
+    return requested === "health" || requested === "leaders" || requested === "heatmap" || requested === "trends" || requested === "calendar" || requested === "settlements" || requested === "alerts" ? requested : "pairs";
   });
   const [filter, setFilter] = usePref<Filter>("arbradar-filter", "all");
   const [search, setSearch] = useState("");
@@ -343,7 +305,6 @@ export function Terminal() {
       active="dashboard"
       exchangesQuery={exchangesQuery}
       hideBrandText={searchOpen && isPhone}
-      topMiddle={<HealthStrip statuses={data?.statuses ?? []} link={link} onOpen={() => setPanel("feeds")} />}
       topActions={topActions}
       onSection={(next: SectionTab) => setTab(next)}
       moreExtras={[
@@ -380,7 +341,7 @@ export function Terminal() {
               profitableLabel={captureMode ? "pay for themselves at the next settlement" : `profitable over ${horizonLabel}`}
               receivedAt={receivedAt}
               link={link}
-              onOpenFeeds={() => setPanel("feeds")}
+              onOpenFeeds={() => setTab("health")}
             />
           ) : null}
 
@@ -394,6 +355,7 @@ export function Terminal() {
                 ["calendar", "Calendar", null],
                 ["settlements", "Settlements", data?.settlements.length ?? null],
                 ["alerts", "Alerts", alertSymbols.size],
+                ["health", "Exchange health", unhealthy || null],
               ] as const
             ).map(([key, label, count]) => (
               <button key={key} type="button" role="tab" className="t-tab" aria-selected={tab === key} onClick={() => setTab(key)}>
@@ -537,6 +499,7 @@ export function Terminal() {
           ) : null}
           {tab === "trends" ? <TrendsView opportunities={opportunities} leaders={data?.leaders ?? []} exchanges={active} onOpen={open} /> : null}
           {tab === "settlements" ? <SettlementsView items={data?.settlements ?? []} onOpen={open} loading={!data} /> : null}
+          {tab === "health" ? <HealthView statuses={data?.statuses ?? []} link={link} receivedAt={receivedAt} loading={!data} /> : null}
           {tab === "alerts" ? <AlertsView alerts={alerts} horizonLabel={horizonLabel} onOpen={open} /> : null}
         </main>
 
@@ -554,11 +517,6 @@ export function Terminal() {
         </div>
       ) : null}
 
-      {panel === "feeds" ? (
-        <Dialog title="Exchange feeds" onClose={() => setPanel(null)}>
-          <FeedsPanel statuses={data?.statuses ?? []} />
-        </Dialog>
-      ) : null}
     </AppChrome>
   );
 }
