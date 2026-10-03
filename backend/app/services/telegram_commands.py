@@ -137,11 +137,11 @@ class TelegramCommandService:
         if upper in {"/NEXT", "/SOON"}:
             return self._format_next_settlements(opportunities)
 
-        if upper in {"/TRADES", "/RESULTS"}:
-            return await self._format_trades()
-
-        if upper == "/PNL":
-            return await self._format_pnl()
+        if upper in {"/TRADES", "/RESULTS", "/PNL"}:
+            # Anyone can message a public bot, but trade results belong to the owner chats only.
+            if chat_id not in self.settings.resolved_telegram_chat_ids:
+                return "Trade results are only available in the chats this bot is set up for."
+            return await (self._format_pnl() if upper == "/PNL" else self._format_trades())
 
         if upper.startswith("/WATCH "):
             symbol_query = normalized.split(maxsplit=1)[1].strip()

@@ -91,3 +91,14 @@ class NextCommandTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ResultsPrivacyTests(unittest.TestCase):
+    def test_trade_results_are_only_shown_to_configured_chats(self) -> None:
+        config = settings(telegram_chat_ids=["owner-1"])
+        service = TelegramCommandService(HistoryStore(config.database_file), config, journal=object())
+        stranger = asyncio.run(service.build_reply("someone-else", "/pnl", [], []))
+        self.assertIn("only available", stranger)
+        self.assertNotIn("Last 7 days", stranger)
+        stranger_trades = asyncio.run(service.build_reply("someone-else", "/trades", [], []))
+        self.assertIn("only available", stranger_trades)
