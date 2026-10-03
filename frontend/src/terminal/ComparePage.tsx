@@ -51,7 +51,7 @@ function ExchangeAxis({ rows }: { rows: SymbolComparisonExchangeSnapshot[] }) {
       </svg>
       <div className="cp-axis-labels">
         {groupLabels(rows, x).map((group) => (
-          <span key={group.names} style={{ left: `${group.at}%` }}>
+          <span key={group.names} data-edge={group.at > 62 ? "right" : group.at < 38 ? "left" : undefined} style={group.at > 62 || group.at < 38 ? undefined : { left: `${group.at}%` }}>
             {group.names}
           </span>
         ))}

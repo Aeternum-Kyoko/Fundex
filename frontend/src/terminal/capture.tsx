@@ -260,8 +260,7 @@ export function CapturePicks({ rows, notional, onOpen }: { rows: CaptureRow[]; n
     <>
       {!anyProfitable ? (
         <p className="t-capture-note">
-          At ${notional.toLocaleString()} per leg with taker fees, no single settlement pays more than it costs right now. Lower fees (maker orders, a VIP tier via the
-          key button) or a bigger payment would change that; the closest setups are below.
+          At ${notional.toLocaleString()} per leg with taker fees, no single settlement pays more than it costs right now. Lower fees (maker orders, a VIP tier set under More, Exchange API keys) or a bigger payment would change that; the closest setups are below.
         </p>
       ) : null}
       <section className="t-best" aria-label="Next funding picks">

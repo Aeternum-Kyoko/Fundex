@@ -5,7 +5,7 @@ import { usePref } from "./prefs";
 import { formatLeverage, formatPrice, formatUsd } from "../lib/monitor";
 import { Empty, SkeletonPanels, SkeletonRows } from "./states";
 import { MiniSpark, rateSparks, type SparkMap, useFundingTrends } from "./trends";
-import { Countdown, ExchangeTag, exchangeVar, pct, TrustBadge } from "./primitives";
+import { clockTime, Countdown, ExchangeTag, exchangeVar, pct, TrustBadge } from "./primitives";
 
 type LeaderMode = "exchange" | "market";
 
@@ -16,6 +16,7 @@ function LeaderRow({ leader, showExchange, onOpen, spark }: { leader: FundingLea
         <span>
           <strong>{leader.base_asset}</strong> {showExchange ? <ExchangeTag exchange={leader.exchange} /> : null}
           <small className="t-muted t-num ld-meta">
+            {leader.next_funding_time ? `${clockTime(leader.next_funding_time)} · in ` : ""}
             <Countdown target={leader.next_funding_time} />
             {leader.max_leverage != null ? ` · ${formatLeverage(leader.max_leverage)}` : ""}
             {leader.open_interest_usd != null ? ` · OI ${formatUsd(leader.open_interest_usd)}` : ""}

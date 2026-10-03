@@ -9,7 +9,7 @@ import type { TradeSessionResponse } from "../lib/trade-types";
 import { BacktestConfidence, DepthBlock, PersistenceBlock, PositionNote, RiskChips, riskFlags, SettledBlock } from "./insights";
 import { AnimatedPct } from "./motion";
 import { TrendBlock } from "./trends";
-import { ExchangeTag, Countdown, EdgeLine, type EdgeScale, EXCHANGE_SHORT, hoursLabel, Icon, legRateLabel, pct, TrustBadge } from "./primitives";
+import { clockTime, ExchangeTag, Countdown, EdgeLine, type EdgeScale, EXCHANGE_SHORT, hoursLabel, Icon, legRateLabel, pct, TrustBadge } from "./primitives";
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "/api";
 
@@ -79,6 +79,7 @@ function AllExchanges({ opportunity, rows, loading }: { opportunity: ArbitrageOp
                   <span className="t-muted"> /{row.funding_interval_hours}h</span>
                 </span>
                 <span className="t-num t-muted ax-meta">
+                  {row.next_funding_time ? `settles ${clockTime(row.next_funding_time)} · in ` : ""}
                   <Countdown target={row.next_funding_time} />
                   {row.max_leverage != null ? ` · ${formatLeverage(row.max_leverage)}` : ""}
                   {row.open_interest_usd != null ? ` · OI ${formatUsd(row.open_interest_usd)}` : ""}

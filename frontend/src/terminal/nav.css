@@ -141,3 +141,37 @@
 .ln-page .ln-section + .ln-section { margin-top: 14px; }
 .ln-flow { max-height: 190px; }
 .t-app .ld-ext { display: inline-flex; align-items: center; padding: 0 10px; line-height: 1; }
+
+/* ---------- Phone pass: more data above the fold, nothing clipped ---------- */
+.cp-axis-labels span[data-edge="right"] { right: 0; left: auto; transform: none; }
+.cp-axis-labels span[data-edge="left"] { left: 0; transform: none; }
+
+@media (max-width: 759px) {
+  /* The summary line scrolls sideways in one row instead of stacking five lines. */
+  .t-app .t-pulse { flex-wrap: nowrap; overflow-x: auto; gap: 6px 18px; margin: 0 -16px 8px; padding: 0 16px 2px; font-size: 13px; scrollbar-width: none; white-space: nowrap; }
+  .t-app .t-pulse::-webkit-scrollbar { display: none; }
+  .t-app .t-pulse > * { flex-shrink: 0; }
+
+  /* Tabs stay under the top bar while you scroll a long list, so switching views is one tap. */
+  .t-app .t-tabs { position: sticky; top: calc(var(--t-topbar-h) + var(--t-safe-t)); z-index: 30; background: var(--t-bg); margin-bottom: 10px; }
+
+  /* The explanatory banner and ticker take less room. */
+  .t-app .t-capture-note { padding: 9px 12px; font-size: 13px; line-height: 1.4; margin-bottom: 10px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .t-app .tk { margin-bottom: 8px; }
+  .t-app .tk-item { padding: 7px 14px; font-size: 13px; }
+  .t-app .t-best-card { padding: 14px; }
+
+  /* Leaders: sparklines would sit on top of the open-interest text on a narrow row. */
+  .t-app .ld-rate .sp, .t-app .ld-rate .sp-empty { display: none; }
+  .t-app .ld-meta { white-space: normal; }
+
+  /* Detail sheet: Trade and Compare stay reachable without scrolling to the bottom. */
+  .t-app .t-sheet .t-actions { position: sticky; bottom: calc(-1 * var(--t-safe-b)); z-index: 2; margin: 18px -18px 0; padding: 12px 18px calc(12px + var(--t-safe-b)); background: var(--t-bg-raised); border-top: 1px solid var(--t-line); }
+  .t-app .t-sheet .t-actions .t-btn { flex: 1; justify-content: center; }
+}
+@media (max-width: 759px) {
+  .t-app .t-sheet .t-actions { flex-wrap: nowrap; gap: 8px; }
+  .t-app .t-sheet .t-actions .t-btn { font-size: 13.5px; padding: 0 10px; min-height: 44px; text-align: center; line-height: 1.2; }
+  /* Copying the summary is a desktop habit; on a phone the two trade actions get the room. */
+  .t-app .t-sheet .t-actions .t-btn:nth-child(3) { display: none; }
+}
