@@ -1,0 +1,13 @@
+# Railway reads this file and it overrides the dashboard's build and start settings.
+# It forces the Dockerfile build (which installs the Python packages) and a start command that
+# honours Railway's injected $PORT, so a leftover Nixpacks/start.sh setting cannot break the deploy.
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "sh -c 'exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --timeout-graceful-shutdown 5'"
+healthcheckPath = "/api/health"
+healthcheckTimeout = 120
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5
