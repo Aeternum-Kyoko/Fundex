@@ -1,6 +1,5 @@
 import React, { lazy, Suspense } from "react";
 import ReactDOM from "react-dom/client";
-import { LoginGate } from "./components/LoginGate";
 import { PageFrame } from "./terminal/SiteHeader";
 import { Terminal } from "./terminal/Terminal";
 import "./styles.css";
@@ -57,8 +56,6 @@ function resolveRoute() {
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <LoginGate>
-      <Suspense fallback={<div className="t-app" style={{ minHeight: "100vh" }} />}>{resolveRoute()}</Suspense>
-    </LoginGate>
+    <Suspense fallback={<div className="t-app" style={{ minHeight: "100vh" }} />}>{resolveRoute()}</Suspense>
   </React.StrictMode>,
 );

@@ -6,11 +6,6 @@ RUN npm ci
 COPY . .
 # Same-origin API: the browser calls https://your-domain/api/...
 ENV VITE_API_URL=/api
-# Optional client-side login screen. It only hides the UI: the values end up in the JS bundle,
-# so it is not real security. The admin API is protected separately by ADMIN_TOKEN.
-ARG VITE_AUTH_USERNAME=""
-ARG VITE_AUTH_PASSWORD=""
-ENV VITE_AUTH_USERNAME=$VITE_AUTH_USERNAME VITE_AUTH_PASSWORD=$VITE_AUTH_PASSWORD
 RUN npm run build
 
 FROM caddy:2-alpine

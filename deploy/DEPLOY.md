@@ -71,4 +71,4 @@ docker run --rm -v deploy_fundex-data:/data -v "$PWD":/backup alpine tar czf /ba
 - The top bar shows every exchange with a recent update, and "Live".
 - `https://yourname.duckdns.org/api/exchanges/status` lists no errors (a Binance 451 error means the server region is blocked).
 - Send `/next` to your bot.
-- Optional login screen: add `VITE_AUTH_USERNAME=... VITE_AUTH_PASSWORD=...` before the `docker compose` command. It only hides the UI (the values are visible in the downloaded JavaScript), so it is not real security; the admin API is protected separately by `ADMIN_TOKEN`.
+- The site has no login screen. To keep it private, put the domain behind Cloudflare Access (free) or add HTTP basic auth in `frontend/deploy-caddyfile`; the admin API is protected separately by `ADMIN_TOKEN`.

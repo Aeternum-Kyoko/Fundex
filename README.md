@@ -387,11 +387,11 @@ Vercel handles Vite builds natively. The key frontend production variable is:
 
 ```bash
 VITE_API_URL=https://your-backend.up.railway.app/api
-VITE_AUTH_USERNAME=...
-VITE_AUTH_PASSWORD=...
 ```
 
 After changing Vercel environment variables, create a new deployment so the built frontend picks them up.
+
+The site has no login screen: anyone with the URL can view the dashboard and arm paper trades. Live trading needs exchange keys typed into the page, and the key admin API requires `ADMIN_TOKEN`. Put the site behind your host's access control (for example Vercel Password Protection, or Cloudflare Access) if it should not be public.
 
 ## Final Smoke Test
 

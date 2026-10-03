@@ -12,11 +12,7 @@ services:
     restart: unless-stopped
 
   web:
-    build:
-      context: ../frontend
-      args:
-        VITE_AUTH_USERNAME: ${VITE_AUTH_USERNAME:-}
-        VITE_AUTH_PASSWORD: ${VITE_AUTH_PASSWORD:-}
+    build: ../frontend
     environment:
       SITE_ADDRESS: ${SITE_ADDRESS:-localhost}
     ports:
