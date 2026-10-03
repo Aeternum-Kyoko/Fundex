@@ -16,7 +16,9 @@ function LeaderRow({ leader, showExchange, onOpen, spark }: { leader: FundingLea
         <span>
           <strong>{leader.base_asset}</strong> {showExchange ? <ExchangeTag exchange={leader.exchange} /> : null}
           <small className="t-muted t-num ld-meta">
-            <Countdown target={leader.next_funding_time} /> · {formatLeverage(leader.max_leverage)} · OI {formatUsd(leader.open_interest_usd)}
+            <Countdown target={leader.next_funding_time} />
+            {leader.max_leverage != null ? ` · ${formatLeverage(leader.max_leverage)}` : ""}
+            {leader.open_interest_usd != null ? ` · OI ${formatUsd(leader.open_interest_usd)}` : ""}
           </small>
         </span>
         <span className="ld-rate">
@@ -34,16 +36,19 @@ function LeaderRow({ leader, showExchange, onOpen, spark }: { leader: FundingLea
   );
 }
 
-function LeaderLists({ positive, negative, showExchange, limit, onOpen, sparks }: { positive: FundingLeader[]; negative: FundingLeader[]; showExchange: boolean; limit: number; onOpen: (symbol: string) => void; sparks: SparkMap }) {
+function LeaderLists({ positive, negative, showExchange, limit, onOpen, sparks, split = false }: { positive: FundingLeader[]; negative: FundingLeader[]; showExchange: boolean; limit: number; onOpen: (symbol: string) => void; sparks: SparkMap; split?: boolean }) {
   return (
-    <>
+    <div className={split ? "ld-split" : undefined}>
+      <div>
       <p className="t-subhead">Shorts get paid most</p>
       <ul className="t-list">
         {positive.slice(0, limit).map((leader) => (
           <LeaderRow key={`p-${leader.exchange}-${leader.exchange_symbol}`} leader={leader} showExchange={showExchange} onOpen={onOpen} spark={sparks[`${leader.canonical_symbol}|${leader.exchange}`]} />
         ))}
       </ul>
-      <p className="t-subhead" style={{ marginTop: 12 }}>
+      </div>
+      <div>
+      <p className="t-subhead" style={split ? undefined : { marginTop: 12 }}>
         Longs get paid most
       </p>
       <ul className="t-list">
@@ -51,7 +56,8 @@ function LeaderLists({ positive, negative, showExchange, limit, onOpen, sparks }
           <LeaderRow key={`n-${leader.exchange}-${leader.exchange_symbol}`} leader={leader} showExchange={showExchange} onOpen={onOpen} spark={sparks[`${leader.canonical_symbol}|${leader.exchange}`]} />
         ))}
       </ul>
-    </>
+      </div>
+    </div>
   );
 }
 
@@ -106,7 +112,7 @@ export function LeadersView({ leaders, onOpen, loading = false }: { leaders: Exc
       {mode === "market" ? (
         <section className="t-panel">
           <h3>Highest funding rates across all exchanges</h3>
-          <LeaderLists positive={market.positive} negative={market.negative} showExchange limit={limit} onOpen={onOpen} sparks={sparks} />
+          <LeaderLists positive={market.positive} negative={market.negative} showExchange limit={limit} onOpen={onOpen} sparks={sparks} split />
         </section>
       ) : (
         <div className="t-grid-leaders">

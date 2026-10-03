@@ -120,3 +120,24 @@
 .hl-pill[data-state="off"] { background: var(--t-surface-2); color: var(--t-text-3); }
 .hl-error { margin: 10px 0 0; padding: 8px 10px; border-radius: 10px; background: var(--t-pay-bg); color: var(--t-pay); font-size: 13px; word-break: break-word; }
 .hl-note { margin: 10px 0 0; font-size: 13px; }
+
+/* ---------- Review fixes ---------- */
+/* The jump button's key hint sits inside the button; the search field's version is absolutely positioned and must not be inherited. */
+.t-app .t-jump .t-kbd { position: static; inset: auto; transform: none; margin-left: 2px; }
+/* On the dashboard the table search already sits beside it, so Jump stays an icon there. */
+.t-app .t-topbar-actions:has(.t-search) .t-jump { width: 38px; padding: 0; justify-content: center; }
+.t-app .t-topbar-actions:has(.t-search) .t-jump-text, .t-app .t-topbar-actions:has(.t-search) .t-jump .t-kbd { display: none; }
+
+/* Funding leaders: shorts and longs side by side on wide screens, rows aligned, border on the row. */
+.ld-split { display: grid; gap: 0 32px; }
+@media (min-width: 900px) { .ld-split { grid-template-columns: 1fr 1fr; } }
+.t-app .ld-row { align-items: center; border-bottom: 1px solid color-mix(in srgb, var(--t-line) 60%, transparent); gap: 8px; }
+.t-app .ld-row:last-child { border-bottom: 0; }
+.t-app .ld-row .ld-main { border-bottom: 0; padding: 9px 0; }
+.t-app .ld-ext { align-self: center; }
+
+.cal-detail .t-list li { padding: 0; }
+.hm-grid { max-width: 1100px; }
+.ln-page .ln-section + .ln-section { margin-top: 14px; }
+.ln-flow { max-height: 190px; }
+.t-app .ld-ext { display: inline-flex; align-items: center; padding: 0 10px; line-height: 1; }

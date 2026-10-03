@@ -54,7 +54,7 @@ export function CalendarView({ rates, exchanges, onOpen }: { rates: Record<strin
   const chosen = slot != null ? slots.find(([key]) => key === slot) ?? slots[0] : slots[0];
   const chosenPayments = [...(chosen?.[1] ?? [])].sort((a, b) => Math.abs(b.rate) - Math.abs(a.rate));
   const x = (time: number) => Math.max(0, Math.min(100, ((time - now) / DAY) * 100));
-  const hourTicks = Array.from({ length: 9 }, (_, index) => now + index * 3 * 3_600_000);
+  const hourTicks = Array.from({ length: 8 }, (_, index) => now + index * 3 * 3_600_000);
 
   return (
     <div className="t-panel cal-panel">

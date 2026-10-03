@@ -78,7 +78,10 @@ function AllExchanges({ opportunity, rows, loading }: { opportunity: ArbitrageOp
                   <span className="t-muted"> /{row.funding_interval_hours}h</span>
                 </span>
                 <span className="t-num t-muted ax-meta">
-                  <Countdown target={row.next_funding_time} /> · {formatLeverage(row.max_leverage)} · OI {formatUsd(row.open_interest_usd)} · fee {pct(row.taker_fee_bps / 100, 3)}
+                  <Countdown target={row.next_funding_time} />
+                  {row.max_leverage != null ? ` · ${formatLeverage(row.max_leverage)}` : ""}
+                  {row.open_interest_usd != null ? ` · OI ${formatUsd(row.open_interest_usd)}` : ""}
+                  {` · fee ${pct(row.taker_fee_bps / 100, 3)}`}
                 </span>
               </a>
             </li>

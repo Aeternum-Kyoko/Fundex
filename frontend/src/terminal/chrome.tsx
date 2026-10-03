@@ -229,7 +229,7 @@ export function AppChrome({ active, children, topMiddle, topActions, hideBrandTe
             </a>
           ))}
           <button type="button" className="t-nav-extra" onClick={() => setPanel("compare")}>
-            {Icon.leaders}
+            {Icon.compare}
             <span>Compare</span>
           </button>
           <a className="t-nav-extra" href="/learn" aria-current={active === "learn" ? "page" : undefined}>

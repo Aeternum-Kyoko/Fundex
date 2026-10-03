@@ -3,7 +3,7 @@ import "./design.css";
 
 function Flow() {
   return (
-    <svg className="ln-flow" viewBox="0 0 560 190" role="img" aria-label="Long on the exchange that pays you, short on the exchange where you get paid">
+    <svg className="ln-flow" viewBox="0 30 560 162" role="img" aria-label="Long on the exchange that pays you, short on the exchange where you get paid">
       <rect x="10" y="40" width="190" height="110" rx="18" fill="var(--t-surface)" stroke="var(--t-line-strong)" />
       <rect x="360" y="40" width="190" height="110" rx="18" fill="var(--t-surface)" stroke="var(--t-line-strong)" />
       <text x="105" y="72" textAnchor="middle" fill="var(--t-text-3)" fontSize="13">Exchange A</text>
