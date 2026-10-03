@@ -30,7 +30,11 @@
 .t-app .t-detail { animation: t-panel-in 0.4s var(--t-out); }
 .t-app .t-detail > * { animation: m-fade 0.3s var(--t-out) both; }
 .t-app .t-sheet { animation: m-rise 0.35s var(--t-out) both; }
-.t-app .t-dialog, .t-app .pl-box { animation: m-pop 0.25s var(--t-out) both; }
+.t-app .pl-box { animation: m-pop 0.25s var(--t-out) both; }
+/* The dialog is centred with a transform, so its animation has to keep the translate. */
+@keyframes m-dialog { from { opacity: 0; transform: translate(-50%, -50%) scale(0.94); } to { opacity: 1; transform: translate(-50%, -50%); } }
+.t-app .t-dialog { animation: m-dialog 0.25s var(--t-out) both; }
+@media (max-width: 759px) { .t-app .t-dialog { animation: t-sheet-in 0.4s var(--t-ease) both; } }
 
 /* Tabs: the underline grows in from the left. */
 .t-app .t-tab[aria-selected="true"]::after { transform-origin: left; animation: m-tab 0.35s var(--t-out) both; }
