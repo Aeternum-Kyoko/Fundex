@@ -1,12 +1,14 @@
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { AdminPanel } from "../components/AdminPanel";
 import type { ExchangeStatus } from "../lib/types";
+import { CommandPalette } from "./palette";
 import { CompareDialog, Dialog, FeedsPanel } from "./panels";
 import { BrandMark, Icon } from "./primitives";
 import "./design.css";
 import "./legacy.css";
 import "./features.css";
 import "./apple.css";
+import "./nav.css";
 
 export type NavKey = "dashboard" | "trade" | "results" | "backtest";
 export type ActiveKey = NavKey | "compare";
@@ -118,11 +120,32 @@ function scrollTop() {
 
 export function AppChrome({ active, children, topMiddle, topActions, hideBrandText, moreExtras = [], onSection, exchangesQuery = "", legacy = false }: AppChromeProps) {
   const [theme, setTheme] = useTheme();
-  const [panel, setPanel] = useState<null | "more" | "compare" | "ios">(null);
+  const [panel, setPanel] = useState<null | "more" | "compare" | "ios" | "jump">(null);
+  const [scrolled, setScrolled] = useState(false);
   const install = useInstall();
   const [adminOpen, setAdminOpen] = useState(false);
   const [statuses, setStatuses] = useState<ExchangeStatus[]>([]);
   const closePanel = useCallback(() => setPanel(null), []);
+
+  // A hairline and a little depth appear under the bar once the page scrolls beneath it.
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 4);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  // Cmd/Ctrl+K opens the jump menu from any screen.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setPanel((current) => (current === "jump" ? null : "jump"));
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // Feed health for the More sheet is fetched on demand, so every page can show it without owning the data.
   useEffect(() => {
@@ -184,29 +207,32 @@ export function AppChrome({ active, children, topMiddle, topActions, hideBrandTe
 
   return (
     <div className={`t-app ${legacy ? "t-legacy" : ""}`}>
-      <header className="t-topbar">
+      <header className="t-topbar" data-scrolled={scrolled || undefined}>
         <a className="t-brand" href="/" aria-label="Fundex home">
           <BrandMark />
           <span className={hideBrandText ? "t-hide-phone" : undefined}>Fundex</span>
         </a>
-        {topMiddle}
         <nav className="t-nav" aria-label="Sections">
           {NAV.map((item) => (
             <a key={item.key} href={item.href} aria-current={active === item.key ? "page" : undefined} onClick={navigate(item.key, item.href)}>
-              {item.label}
+              {item.icon}
+              <span>{item.label}</span>
             </a>
           ))}
         </nav>
+        {topMiddle}
         <div className="t-topbar-actions">
           {topActions}
+          <button type="button" className="t-jump" onClick={() => setPanel("jump")} aria-label="Jump to a coin, page or setting" title="Jump to (Ctrl or Cmd + K)">
+            {Icon.search}
+            <span className="t-jump-text">Jump to</span>
+            <span className="t-kbd">⌘K</span>
+          </button>
           <button type="button" className="t-icon-btn t-menu-btn" onClick={() => setPanel("more")} aria-label="More: compare, sections, Telegram bot, keys">
             {Icon.more}
           </button>
           <button type="button" className="t-icon-btn" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}>
             {theme === "dark" ? Icon.sun : Icon.moon}
-          </button>
-          <button type="button" className="t-icon-btn" onClick={() => setAdminOpen(true)} aria-label="Exchange API keys">
-            {Icon.key}
           </button>
         </div>
       </header>
@@ -242,6 +268,9 @@ export function AppChrome({ active, children, topMiddle, topActions, hideBrandTe
           </h3>
           <FeedsPanel statuses={statuses} />
         </Dialog>
+      ) : null}
+      {panel === "jump" ? (
+        <CommandPalette pages={NAV.map((item) => ({ label: item.label, href: item.href }))} actions={items} exchangesQuery={exchangesQuery} onClose={closePanel} />
       ) : null}
       {panel === "ios" ? (
         <Dialog title="Add Fundex to your Home Screen" onClose={closePanel}>
