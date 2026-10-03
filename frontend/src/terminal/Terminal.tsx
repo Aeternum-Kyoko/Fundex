@@ -4,6 +4,8 @@ import { DetailContent, DetailSheet } from "./detail";
 import { type Density, PairCards, PairTable, type SortKey } from "./pairs";
 import { CaptureCards, CapturePicks, type CaptureRow, CaptureTable } from "./capture";
 import { type SectionTab, AppChrome } from "./chrome";
+import { AnimatedPct } from "./motion";
+import { Ticker } from "./ticker";
 import { downloadCsv, PulseStrip } from "./panels";
 import { useMediaQuery, usePref } from "./prefs";
 import { EdgeLine, type EdgeScale, EXCHANGE_SHORT, exchangeVar, hoursLabel, Icon, makeEdgeScale, nextPayout, pct, TrustBadge } from "./primitives";
@@ -98,7 +100,7 @@ function BestPicks({
             Long {pick.base_asset} on {EXCHANGE_SHORT[pick.long_leg.exchange]}, short on {EXCHANGE_SHORT[pick.short_leg.exchange]}
           </h2>
           <span className="t-best-money">
-            <strong className="t-num">{pct(pick.net_return_percent, 2, true)}</strong>
+            <strong className="t-num"><AnimatedPct value={pick.net_return_percent} digits={2} signed /></strong>
             <span className="t-soft">over {horizonLabel} after costs</span>
           </span>
           <EdgeLine opportunity={pick} scale={scale} height={index === 0 ? 30 : 24} />
@@ -258,6 +260,7 @@ export function Terminal() {
 
   const detail = selectedRow ? (
     <DetailContent
+      key={selectedRow.canonical_symbol}
       opportunity={selectedRow}
       scale={scale}
       horizonLabel={horizonLabel}
@@ -323,6 +326,8 @@ export function Terminal() {
             </div>
           ) : null}
 
+          {data ? <Ticker rows={opportunities} onOpen={open} /> : null}
+
           {tab === "pairs" ? <PositionsStrip trades={positions} opportunities={opportunities} onOpen={open} /> : null}
 
           {tab === "pairs" && data ? (
@@ -365,6 +370,7 @@ export function Terminal() {
             ))}
           </div>
 
+          <div className="t-view" key={tab}>
           {tab === "pairs" ? (
             <>
               <div className="t-toolbar">
@@ -501,6 +507,7 @@ export function Terminal() {
           {tab === "settlements" ? <SettlementsView items={data?.settlements ?? []} onOpen={open} loading={!data} /> : null}
           {tab === "health" ? <HealthView statuses={data?.statuses ?? []} link={link} receivedAt={receivedAt} loading={!data} /> : null}
           {tab === "alerts" ? <AlertsView alerts={alerts} horizonLabel={horizonLabel} onOpen={open} /> : null}
+          </div>
         </main>
 
         {detail && isWide ? <aside className="t-detail" aria-label={`${selectedRow?.base_asset} details`}>{detail}</aside> : null}

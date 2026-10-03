@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -86,3 +87,31 @@ class SettledFundingResolver:
                 settled = snapshot.metadata.get("last_settled_funding_rate")
                 return float(settled) if settled is not None else None
         return None
+
+    async def recent(
+        self,
+        exchange: str,
+        exchange_symbol: str,
+        interval_hours: int,
+        next_funding_time: datetime | None,
+        count: int = 6,
+    ) -> list[tuple[datetime, float]]:
+        """The last `count` settled rates, oldest first. Empty for venues that publish no history."""
+        try:
+            if exchange == "binance":
+                response = await self.client.get(
+                    "https://fapi.binance.com/fapi/v1/fundingRate",
+                    params={"symbol": exchange_symbol, "limit": count},
+                    timeout=15.0,
+                )
+                response.raise_for_status()
+                return [(datetime.fromtimestamp(float(row["fundingTime"]) / 1000, timezone.utc), float(row["fundingRate"])) for row in response.json()]
+            if exchange == "delta" and next_funding_time is not None:
+                step = timedelta(hours=max(interval_hours, 1))
+                moments = [next_funding_time - step * index for index in range(1, count + 1)]
+                rates = await asyncio.gather(*(self._delta(exchange_symbol, moment) for moment in moments), return_exceptions=True)
+                found = [(moment, rate) for moment, rate in zip(moments, rates) if isinstance(rate, float)]
+                return sorted(found, key=lambda item: item[0])
+        except Exception:
+            logger.warning("Recent settled funding lookup failed for %s %s", exchange, exchange_symbol, exc_info=True)
+        return []

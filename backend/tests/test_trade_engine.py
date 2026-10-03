@@ -250,3 +250,26 @@ class SchedulerTests(unittest.TestCase):
         self.assertEqual(entered, [])
         self.assertIn("Missed the entry window", response.events[-1].message)
         asyncio.run(manager.client.aclose())
+
+
+def test_recent_settled_funding_reads_binance_history():
+    import asyncio
+
+    from app.services.settled_funding import SettledFundingResolver
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [{"fundingTime": 1_700_000_000_000, "fundingRate": "0.0001"}, {"fundingTime": 1_700_028_800_000, "fundingRate": "0.0003"}]
+
+    class FakeClient:
+        async def get(self, url, params=None, timeout=None):
+            assert "fundingRate" in url and params["symbol"] == "BTCUSDT"
+            return FakeResponse()
+
+    resolver = SettledFundingResolver(FakeClient(), market_store=None)  # type: ignore[arg-type]
+    rows = asyncio.run(resolver.recent("binance", "BTCUSDT", 8, None, 2))
+    assert [rate for _, rate in rows] == [0.0001, 0.0003]
+    assert asyncio.run(resolver.recent("wazirx", "BTC", 8, None, 2)) == []

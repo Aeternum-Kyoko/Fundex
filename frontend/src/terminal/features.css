@@ -138,3 +138,14 @@
   .cal-stat { scroll-snap-align: start; }
 }
 .dp-name em { padding: 0 5px; border-radius: 6px; background: var(--t-surface-2); font-weight: 600; }
+
+/* Predicted versus settled */
+.sb-list { margin: 0; padding: 0; list-style: none; }
+.sb-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid color-mix(in srgb, var(--t-line) 60%, transparent); }
+.sb-list li:last-child { border-bottom: 0; }
+.sb-name { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sb-nums { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 2px 14px; font-size: 13px; }
+.sb-verdict { grid-column: 1 / -1; justify-self: start; padding: 1px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--t-surface-2); color: var(--t-text-2); }
+.sb-verdict[data-tone="pass"] { background: var(--t-receive-bg); color: var(--t-receive); }
+.sb-verdict[data-tone="warn"] { background: var(--t-amber-bg); color: var(--t-amber); }
+.sb-verdict[data-tone="fail"] { background: var(--t-pay-bg); color: var(--t-pay); }

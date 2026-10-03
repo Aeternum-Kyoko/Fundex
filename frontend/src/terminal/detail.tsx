@@ -6,7 +6,8 @@ import { CaptureBlock, type CaptureRow } from "./capture";
 import { tradeHref } from "./pairs";
 import { useClock } from "./clock";
 import type { TradeSessionResponse } from "../lib/trade-types";
-import { BacktestConfidence, DepthBlock, PersistenceBlock, PositionNote, RiskChips, riskFlags } from "./insights";
+import { BacktestConfidence, DepthBlock, PersistenceBlock, PositionNote, RiskChips, riskFlags, SettledBlock } from "./insights";
+import { AnimatedPct } from "./motion";
 import { TrendBlock } from "./trends";
 import { ExchangeTag, Countdown, EdgeLine, type EdgeScale, EXCHANGE_SHORT, hoursLabel, Icon, legRateLabel, pct, TrustBadge } from "./primitives";
 
@@ -252,7 +253,7 @@ export function DetailContent({
       </p>
 
       <div className="t-bigline">
-        <strong className={`t-num ${profitable ? "t-receive" : "t-pay"}`}>{pct(opportunity.net_return_percent, 3, true)}</strong>
+        <strong className={`t-num ${profitable ? "t-receive" : "t-pay"}`}><AnimatedPct value={opportunity.net_return_percent} digits={3} signed /></strong>
         <span className="t-soft">
           net over {horizonLabel}, <span className="t-num">{pct(opportunity.net_apr_percent, 1)}</span> a year
         </span>
@@ -306,6 +307,11 @@ export function DetailContent({
       <div className="t-section">
         <h3>Does this edge last?</h3>
         <PersistenceBlock opportunity={opportunity} points={history} />
+      </div>
+
+      <div className="t-section">
+        <h3>Predicted versus settled</h3>
+        <SettledBlock symbol={opportunity.canonical_symbol} />
       </div>
 
       <div className="t-section">

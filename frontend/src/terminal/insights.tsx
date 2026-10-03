@@ -3,6 +3,7 @@ import { formatUsd } from "../lib/monitor";
 import type { TradeSessionResponse } from "../lib/trade-types";
 import type { ArbitrageOpportunity, OpportunityHistoryPoint } from "../lib/types";
 import { Countdown, EXCHANGE_SHORT, ExchangeTag, pct } from "./primitives";
+import { MiniSpark } from "./trends";
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "/api";
 
@@ -419,5 +420,85 @@ export function PositionNote({ trades, symbol }: { trades: TradeSessionResponse[
       You have {mine.length} open {mine[0].mode} trade{mine.length > 1 ? "s" : ""} on this coin: {EXCHANGE_SHORT[mine[0].long_leg.exchange]} long, {EXCHANGE_SHORT[mine[0].short_leg.exchange]} short,{" "}
       {mine[0].current_phase}. <a href={`/trade/${encodeURIComponent(symbol)}`}>Open the trade</a>
     </p>
+  );
+}
+
+/* ---------- Predicted versus settled ---------- */
+
+interface SettledRow {
+  exchange: string;
+  display_name: string;
+  predicted_rate: number;
+  interval_hours: number;
+  settled: Array<{ at: string; rate: number }>;
+}
+
+function drift(predicted: number, average: number) {
+  if (average === 0) return { label: "No recent baseline", tone: "info" };
+  if (Math.sign(predicted) !== Math.sign(average) && Math.abs(predicted) > Math.abs(average) * 0.25) return { label: "Flipped sign vs recent", tone: "fail" };
+  const ratio = Math.abs(predicted) / Math.abs(average);
+  if (ratio > 2) return { label: `${ratio.toFixed(1)}x its recent level`, tone: "warn" };
+  if (ratio < 0.5) return { label: "Below its recent level", tone: "warn" };
+  return { label: "In line with recent", tone: "pass" };
+}
+
+/** The prediction next to the rates that really settled, so a spike that rarely pays out is visible. */
+export function SettledBlock({ symbol }: { symbol: string }) {
+  const [rows, setRows] = useState<SettledRow[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    setRows(null);
+    setFailed(false);
+    fetch(`${API_BASE}/symbols/${encodeURIComponent(symbol)}/settled?count=6`)
+      .then((response) => (response.ok ? response.json() : Promise.reject(new Error("settled"))))
+      .then((payload) => !cancelled && setRows(payload.exchanges ?? []))
+      .catch(() => !cancelled && setFailed(true));
+    return () => {
+      cancelled = true;
+    };
+  }, [symbol]);
+
+  if (failed) return <p className="t-muted">Couldn't read settled rates just now.</p>;
+  if (!rows) return <div className="t-skel" style={{ height: 80, borderRadius: 10 }} aria-busy="true" />;
+  const withHistory = rows.filter((row) => row.settled.length);
+  const without = rows.filter((row) => !row.settled.length);
+  if (!withHistory.length) return <p className="t-muted">No exchange for this coin publishes settled history, so every rate here is a prediction.</p>;
+
+  return (
+    <div className="sb-block">
+      <ul className="sb-list">
+        {withHistory.map((row) => {
+          const values = row.settled.map((entry) => entry.rate);
+          const average = values.reduce((sum, value) => sum + value, 0) / values.length;
+          const verdict = drift(row.predicted_rate, average);
+          return (
+            <li key={row.exchange}>
+              <span className="sb-name">
+                <ExchangeTag exchange={row.exchange} />
+                <small className="t-muted">last {values.length} settlements</small>
+              </span>
+              <MiniSpark values={values} width={64} height={22} label={`${row.display_name} settled rates`} />
+              <span className="t-num sb-nums">
+                <span>
+                  predicted {pct(row.predicted_rate * 100, 4, true)}
+                </span>
+                <span className="t-muted">
+                  settled avg {pct(average * 100, 4, true)}, last {pct(values[values.length - 1] * 100, 4, true)}
+                </span>
+              </span>
+              <span className="sb-verdict" data-tone={verdict.tone}>
+                {verdict.label}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+      {without.length ? (
+        <p className="t-muted" style={{ fontSize: 12.5, marginTop: 8 }}>
+          {without.map((row) => EXCHANGE_SHORT[row.exchange] ?? row.exchange).join(", ")} publish no settled history, so their rate is a prediction only.
+        </p>
+      ) : null}
+    </div>
   );
 }

@@ -1,0 +1,164 @@
+/* Exchange look: near-black surfaces, one yellow accent, green and red only for money.
+   Active unless the viewer picks "Classic look" (data-style="classic"). */
+
+:root:not([data-style="classic"]) {
+  --t-font-ui: "IBM Plex Sans", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --t-font-display: "IBM Plex Sans", "Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --t-radius-s: 6px;
+  --t-radius-m: 10px;
+  --t-radius-l: 14px;
+}
+
+:root[data-theme="dark"]:not([data-style="classic"]) {
+  color-scheme: dark;
+  --t-bg: #0b0e11;
+  --t-bg-raised: #181a20;
+  --t-surface: #1e2329;
+  --t-surface-2: #252930;
+  --t-line: #2b3139;
+  --t-line-strong: #3c4350;
+  --t-text: #eaecef;
+  --t-text-2: #b7bdc6;
+  --t-text-3: #848e9c;
+  --t-receive: #0ecb81;
+  --t-receive-bg: rgba(14, 203, 129, 0.12);
+  --t-pay: #f6465d;
+  --t-pay-bg: rgba(246, 70, 93, 0.13);
+  --t-amber: #f0b90b;
+  --t-amber-bg: rgba(240, 185, 11, 0.12);
+  --t-focus: #f0b90b;
+  --t-on-amber: #1e2026;
+  --t-on-pay: #ffffff;
+  --t-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
+  --t-scrim: rgba(0, 0, 0, 0.62);
+  --x-binance: #f0b90b;
+  --x-delta: #7f97ff;
+  --x-coindcx: #3cc8e6;
+  --x-wazirx: #b48cff;
+  --x-coinswitch: #ff9f6e;
+}
+
+:root[data-theme="light"]:not([data-style="classic"]) {
+  color-scheme: light;
+  --t-bg: #f5f5f5;
+  --t-bg-raised: #ffffff;
+  --t-surface: #ffffff;
+  --t-surface-2: #eaecef;
+  --t-line: #e6e8ea;
+  --t-line-strong: #d0d4da;
+  --t-text: #1e2026;
+  --t-text-2: #474d57;
+  --t-text-3: #707a8a;
+  --t-receive: #03a66d;
+  --t-receive-bg: rgba(3, 166, 109, 0.1);
+  --t-pay: #cf304a;
+  --t-pay-bg: rgba(207, 48, 74, 0.09);
+  --t-amber: #b88700;
+  --t-amber-bg: rgba(240, 185, 11, 0.16);
+  --t-focus: #c99400;
+  --t-on-amber: #1e2026;
+  --t-on-pay: #ffffff;
+  --t-shadow: 0 24px 60px rgba(30, 32, 38, 0.14);
+  --t-scrim: rgba(30, 32, 38, 0.4);
+  --x-binance: #b88700;
+  --x-delta: #4a63d8;
+  --x-coindcx: #0f8fab;
+  --x-wazirx: #7a50d6;
+  --x-coinswitch: #d0632c;
+}
+
+/* ---------- Bars: solid, with a hairline, like a trading terminal ---------- */
+:root:not([data-style="classic"]) .t-app .t-topbar {
+  background: var(--t-bg);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  border-bottom-color: var(--t-line);
+  box-shadow: none;
+}
+:root:not([data-style="classic"]) .t-app .t-topbar[data-scrolled] { box-shadow: 0 8px 24px -18px rgb(0 0 0 / 0.8); }
+
+/* Top-bar links: plain text, yellow when current, no track. */
+:root:not([data-style="classic"]) .t-app .t-nav { background: none; padding: 0; gap: 2px; }
+:root:not([data-style="classic"]) .t-app .t-nav a,
+:root:not([data-style="classic"]) .t-app .t-nav button.t-nav-extra,
+:root:not([data-style="classic"]) .t-app .t-nav a.t-nav-extra { position: relative; border-radius: 6px; color: var(--t-text-2); font-weight: 500; }
+:root:not([data-style="classic"]) .t-app .t-nav a:hover,
+:root:not([data-style="classic"]) .t-app .t-nav .t-nav-extra:hover { color: var(--t-amber); background: none; }
+:root:not([data-style="classic"]) .t-app .t-nav a[aria-current="page"],
+:root:not([data-style="classic"]) .t-app .t-nav .t-nav-extra[aria-current="page"] { color: var(--t-amber); background: none; box-shadow: none; }
+:root:not([data-style="classic"]) .t-app .t-nav a[aria-current="page"]::after,
+:root:not([data-style="classic"]) .t-app .t-nav .t-nav-extra[aria-current="page"]::after { content: ""; position: absolute; left: 12px; right: 12px; bottom: -13px; height: 2px; border-radius: 2px; background: var(--t-amber); }
+
+/* Phones: a flat tab bar pinned to the bottom, active icon in yellow. */
+@media (max-width: 1099px) {
+  :root:not([data-style="classic"]) { --t-dock-h: 62px; }
+  :root:not([data-style="classic"]) .t-app .t-dock {
+    left: 0; right: 0; bottom: 0;
+    height: calc(var(--t-dock-h) + var(--t-safe-b));
+    padding: 6px 8px var(--t-safe-b);
+    border: 0;
+    border-top: 1px solid var(--t-line);
+    border-radius: 0;
+    background: var(--t-bg-raised);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    box-shadow: none;
+  }
+  :root:not([data-style="classic"]) .t-app .t-dock a[aria-current="page"]::before,
+  :root:not([data-style="classic"]) .t-app .t-dock button[data-open="true"]::before { display: none; }
+  :root:not([data-style="classic"]) .t-app .t-main { padding-bottom: calc(var(--t-dock-h) + var(--t-safe-b) + 16px); }
+}
+
+/* ---------- Surfaces: flat panels, thin borders, no glow ---------- */
+:root:not([data-style="classic"]) .t-app .t-panel,
+:root:not([data-style="classic"]) .t-app .t-best-card,
+:root:not([data-style="classic"]) .t-app .t-card,
+:root:not([data-style="classic"]) .t-app .ps-pos,
+:root:not([data-style="classic"]) .t-app .cal-stat {
+  border-color: var(--t-line);
+  border-radius: var(--t-radius-m);
+  background: var(--t-bg-raised);
+  box-shadow: none;
+}
+:root:not([data-style="classic"]) .t-app .t-best-card[data-lead="true"] { border-color: color-mix(in srgb, var(--t-amber) 45%, var(--t-line)); }
+:root:not([data-style="classic"]) .t-app .t-row:hover { background: var(--t-surface); }
+:root:not([data-style="classic"]) .t-app .t-head { background: var(--t-bg); }
+
+/* Controls */
+:root:not([data-style="classic"]) .t-app .t-btn { border-radius: 8px; font-weight: 600; background: var(--t-surface); border-color: var(--t-line); }
+:root:not([data-style="classic"]) .t-app .t-btn[data-primary="true"] { background: var(--t-amber); color: var(--t-on-amber); border-color: transparent; box-shadow: none; }
+:root:not([data-style="classic"]) .t-app .t-btn[data-primary="true"]:hover { filter: brightness(1.06); }
+:root:not([data-style="classic"]) .t-app .t-segmented { background: var(--t-surface); border-radius: 8px; padding: 2px; }
+:root:not([data-style="classic"]) .t-app .t-segmented button { border-radius: 6px; color: var(--t-text-3); }
+:root:not([data-style="classic"]) .t-app .t-segmented button[aria-pressed="true"] { background: var(--t-surface-2); color: var(--t-amber); box-shadow: none; }
+:root:not([data-style="classic"]) .t-app .t-chip { border-radius: 6px; }
+:root:not([data-style="classic"]) .t-app .t-icon-btn,
+:root:not([data-style="classic"]) .t-app .t-jump,
+:root:not([data-style="classic"]) .t-app .t-search input { border-radius: 8px; background: var(--t-surface); border-color: var(--t-line); }
+:root:not([data-style="classic"]) .t-app :focus-visible { box-shadow: 0 0 0 2px color-mix(in srgb, var(--t-amber) 70%, transparent); }
+
+/* Tabs: text with a yellow underline */
+:root:not([data-style="classic"]) .t-app .t-tab { font-weight: 500; }
+:root:not([data-style="classic"]) .t-app .t-tab[aria-selected="true"] { color: var(--t-text); }
+:root:not([data-style="classic"]) .t-app .t-tab[aria-selected="true"]::after { background: var(--t-amber); }
+
+/* Sheets and the jump menu: solid panels */
+:root:not([data-style="classic"]) .t-app .t-sheet,
+:root:not([data-style="classic"]) .pl-box { background: var(--t-bg-raised); -webkit-backdrop-filter: none; backdrop-filter: none; }
+
+/* Ticker */
+.tk { display: flex; align-items: center; gap: 0; margin: 0 0 14px; border: 1px solid var(--t-line); border-radius: var(--t-radius-m); background: var(--t-bg-raised); overflow: hidden; }
+.tk-label { flex-shrink: 0; padding: 0 12px; align-self: stretch; display: inline-flex; align-items: center; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--t-on-amber); background: var(--t-amber); }
+.tk-window { flex: 1; min-width: 0; overflow: hidden; mask-image: linear-gradient(90deg, transparent, #000 24px, #000 calc(100% - 24px), transparent); -webkit-mask-image: linear-gradient(90deg, transparent, #000 24px, #000 calc(100% - 24px), transparent); }
+.tk-track { display: flex; width: max-content; animation: tk-run 70s linear infinite; }
+.tk-window:hover .tk-track { animation-play-state: paused; }
+.tk-item { display: inline-flex; align-items: baseline; gap: 8px; padding: 9px 18px; border: 0; background: none; font-size: 13.5px; cursor: pointer; white-space: nowrap; color: var(--t-text); }
+.tk-item:hover strong { color: var(--t-amber); }
+@keyframes tk-run { to { transform: translateX(-50%); } }
+@media (max-width: 759px) { .tk-label { display: none; } }
+
+/* IBM Plex reads best at natural spacing; the tight tracking in apple.css is for SF Pro. */
+:root:not([data-style="classic"]) .t-app { letter-spacing: 0; }
+:root:not([data-style="classic"]) .t-app .t-num { letter-spacing: 0; }
+:root:not([data-style="classic"]) .t-app h1, :root:not([data-style="classic"]) .t-app h2, :root:not([data-style="classic"]) .t-app .td-title, :root:not([data-style="classic"]) .t-app .t-best-title, :root:not([data-style="classic"]) .t-app .t-brand { letter-spacing: -0.012em; }
+:root:not([data-style="classic"]) .t-app .td-title { font-weight: 600; }

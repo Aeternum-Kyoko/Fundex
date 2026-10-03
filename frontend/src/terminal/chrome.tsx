@@ -10,6 +10,8 @@ import "./legacy.css";
 import "./features.css";
 import "./apple.css";
 import "./nav.css";
+import "./binance.css";
+import "./motion.css";
 
 export type NavKey = "dashboard" | "trade" | "results" | "backtest";
 export type ActiveKey = NavKey | "compare" | "learn";
@@ -27,6 +29,28 @@ export const NAV: Array<{ key: NavKey; label: string; href: string; icon: ReactN
   { key: "backtest", label: "Backtest", href: "/backtest", icon: Icon.clock },
 ];
 
+const STYLE_KEY = "arbradar-style";
+
+/** "binance" is the default exchange-terminal look; "classic" is the original petrol and amber one. */
+export function useStyle() {
+  const [style, setStyle] = useState<"binance" | "classic">(() => {
+    try {
+      return window.localStorage.getItem(STYLE_KEY) === "classic" ? "classic" : "binance";
+    } catch {
+      return "binance";
+    }
+  });
+  useEffect(() => {
+    document.documentElement.dataset.style = style;
+    try {
+      window.localStorage.setItem(STYLE_KEY, style);
+    } catch {
+      // ignore
+    }
+  }, [style]);
+  return [style, setStyle] as const;
+}
+
 export function useTheme() {
   const [theme, setTheme] = useState<"light" | "dark">(() => {
     try {
@@ -35,7 +59,8 @@ export function useTheme() {
     } catch {
       // ignore
     }
-    return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+    // Dark is the house look; light is one tap away.
+    return "dark";
   });
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -121,6 +146,7 @@ function scrollTop() {
 
 export function AppChrome({ active, children, topMiddle, topActions, hideBrandText, moreExtras = [], onSection, exchangesQuery = "", legacy = false }: AppChromeProps) {
   const [theme, setTheme] = useTheme();
+  const [style, setStyle] = useStyle();
   const [panel, setPanel] = useState<null | "more" | "compare" | "ios" | "jump">(null);
   const [scrolled, setScrolled] = useState(false);
   const install = useInstall();
@@ -191,6 +217,7 @@ export function AppChrome({ active, children, topMiddle, topActions, hideBrandTe
         : []),
     { label: "How Fundex works", description: "Funding arbitrage, costs and trust levels explained", href: "/learn" },
     { label: "Telegram bot", description: "Alerts and /next, /coin, /trades in Telegram", href: TELEGRAM_BOT_URL, external: true },
+    { label: style === "binance" ? "Classic look" : "Exchange look", description: style === "binance" ? "Switch to the original petrol and amber design" : "Switch to the black and yellow exchange design", onClick: () => setStyle(style === "binance" ? "classic" : "binance") },
     { label: theme === "dark" ? "Light theme" : "Dark theme", description: "Switch the look", onClick: () => setTheme(theme === "dark" ? "light" : "dark") },
     { label: "Exchange API keys", description: "Admin: fee tier and CoinSwitch access", onClick: () => { closePanel(); setAdminOpen(true); } },
   ];

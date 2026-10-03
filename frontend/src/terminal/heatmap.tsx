@@ -64,12 +64,12 @@ export function HeatmapView({ rates, exchanges, onOpen }: { rates: RateMap; exch
             </span>
           ))}
           <span className="hm-head hm-right" role="columnheader">Gap</span>
-          {shown.map((row) => {
+          {shown.map((row, rowIndex) => {
             const values = row.entries.map(perEight);
             const hi = Math.max(...values);
             const lo = Math.min(...values);
             return (
-              <HeatRow key={row.symbol} symbol={row.symbol} entries={row.entries} columns={columns} hi={hi} lo={lo} gap={row.gap} scale={scale} onOpen={onOpen} />
+              <HeatRow key={row.symbol} index={Math.min(rowIndex, 24)} symbol={row.symbol} entries={row.entries} columns={columns} hi={hi} lo={lo} gap={row.gap} scale={scale} onOpen={onOpen} />
             );
           })}
         </div>
@@ -80,6 +80,7 @@ export function HeatmapView({ rates, exchanges, onOpen }: { rates: RateMap; exch
 }
 
 function HeatRow({
+  index,
   symbol,
   entries,
   columns,
@@ -89,6 +90,7 @@ function HeatRow({
   scale,
   onOpen,
 }: {
+  index: number;
   symbol: string;
   entries: RateRow[];
   columns: string[];
@@ -100,7 +102,7 @@ function HeatRow({
 }) {
   return (
     <>
-      <button type="button" className="hm-coin hm-sticky" onClick={() => onOpen(symbol)}>
+      <button type="button" className="hm-coin hm-sticky" style={{ "--d": index } as React.CSSProperties} onClick={() => onOpen(symbol)}>
         {symbol.split("-")[0]}
       </button>
       {columns.map((exchange) => {
@@ -115,7 +117,7 @@ function HeatRow({
             type="button"
             className="hm-cell t-num"
             data-edge={value === hi ? "short" : value === lo ? "long" : undefined}
-            style={{ background: `color-mix(in srgb, ${colour} ${Math.round(strength * 55)}%, transparent)` }}
+            style={{ background: `color-mix(in srgb, ${colour} ${Math.round(strength * 55)}%, transparent)`, "--d": index } as React.CSSProperties}
             title={`${symbol.split("-")[0]} on ${EXCHANGE_SHORT[exchange]}: ${pct(entry.rate * 100, 4, true)} every ${entry.interval_hours}h`}
             onClick={() => onOpen(symbol)}
           >

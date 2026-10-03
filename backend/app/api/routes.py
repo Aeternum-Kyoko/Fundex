@@ -248,6 +248,30 @@ async def symbol_depth(request: Request, canonical_symbol: str, exchanges: str |
     return {"canonical_symbol": canonical_symbol, "exchanges": [row for row in results if row]}
 
 
+@router.get("/symbols/{canonical_symbol}/settled")
+async def symbol_settled(request: Request, canonical_symbol: str, count: int = 6) -> dict:
+    """Predicted rate next to the rates that really settled, per exchange that publishes history."""
+    resolver = request.app.state.trade_manager._funding_resolver  # noqa: SLF001
+    snapshots = [s for s in await _snapshots_for_exchanges(request, _enabled_exchanges(request)) if s.canonical_symbol == canonical_symbol]
+    resolved_count = max(2, min(count, 12))
+
+    async def one(snapshot) -> dict:
+        history = await asyncio.wait_for(
+            resolver.recent(snapshot.exchange, snapshot.exchange_symbol, snapshot.funding_interval_hours, snapshot.next_funding_time, resolved_count),
+            timeout=20,
+        )
+        return {
+            "exchange": snapshot.exchange,
+            "display_name": exchange_display_name(snapshot.exchange),
+            "predicted_rate": snapshot.funding_rate,
+            "interval_hours": snapshot.funding_interval_hours,
+            "settled": [{"at": moment.isoformat(), "rate": rate} for moment, rate in history],
+        }
+
+    results = await asyncio.gather(*(one(snapshot) for snapshot in snapshots), return_exceptions=True)
+    return {"canonical_symbol": canonical_symbol, "exchanges": [row for row in results if isinstance(row, dict)]}
+
+
 @router.get("/symbols/{canonical_symbol}/comparison", response_model=SymbolComparisonResponse)
 async def symbol_comparison(
     request: Request, canonical_symbol: str, exchanges: str | None = None, strategy: str = "hold"

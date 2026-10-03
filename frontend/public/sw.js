@@ -1,5 +1,5 @@
 /* Fundex service worker: the app shell works offline, live data never comes from a cache. */
-const VERSION = "fundex-v1";
+const VERSION = "fundex-v2";
 const SHELL = ["/", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/favicon.svg"];
 
 self.addEventListener("install", (event) => {

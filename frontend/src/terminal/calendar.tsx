@@ -186,7 +186,7 @@ export function CalendarView({
                 aria-label={`${hourLabel(start + index * HOUR)}, ${count} payments`}
               >
                 <span className="cal-flag" data-good={best != null && best.capture.net_percent > 0} data-on={best != null} />
-                <span className="cal-stack" style={{ height: `${Math.max(count ? 4 : 0, (count / max) * 100)}%` }}>
+                <span className="cal-stack" style={{ height: `${Math.max(count ? 4 : 0, (count / max) * 100)}%`, "--i": index } as React.CSSProperties}>
                   {exchanges.map((exchange) => (bucket[exchange] ? <i key={exchange} style={{ flex: bucket[exchange], background: `var(--x-${exchange})` }} /> : null))}
                 </span>
                 <span className="cal-hour t-num">{index % 3 === 0 ? (index === 0 ? "now" : hourLabel(start + index * HOUR, true)) : ""}</span>

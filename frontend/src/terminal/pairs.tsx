@@ -3,6 +3,7 @@ import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { formatLeverage, formatUsd } from "../lib/monitor";
 import type { ArbitrageOpportunity, OpportunityLeg } from "../lib/types";
 import { RiskChips } from "./insights";
+import { AnimatedPct } from "./motion";
 import { MiniSpark, type SparkMap } from "./trends";
 import { Countdown, EdgeLine, type EdgeScale, ExchangeTag, hoursLabel, nextPayout, pct, TrustBadge } from "./primitives";
 
@@ -209,10 +210,10 @@ const PairRow = memo(function PairRow({
       {detailed ? <LegCell leg={row.short_leg} fallback={row.funding_interval_hours} /> : null}
       <span className="t-num t-right t-spread-cell">
         {spark ? <MiniSpark values={spark} width={44} height={18} label={`${row.base_asset} spread trend`} /> : null}
-        {pct(row.spread_rate * 100, 4)}
+        <AnimatedPct value={row.spread_rate * 100} digits={4} />
       </span>
       <span className="t-cell-stack t-right">
-        <span className={`t-num ${profitable ? "t-receive" : "t-pay"}`}>{pct(row.net_return_percent, 3, true)}</span>
+        <span className={`t-num ${profitable ? "t-receive" : "t-pay"}`}><AnimatedPct value={row.net_return_percent} digits={3} signed /></span>
         <small className="t-num">{pct(row.net_apr_percent, 1)} APR</small>
       </span>
       <span className="t-num t-right t-col-be t-soft">{hoursLabel(row.break_even_hours)}</span>

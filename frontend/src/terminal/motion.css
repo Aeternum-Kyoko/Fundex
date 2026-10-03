@@ -1,0 +1,60 @@
+/* Motion: everything animates transform and opacity only, and the global reduced-motion rule in apple.css silences it all. */
+
+:root { --t-out: cubic-bezier(0.16, 1, 0.3, 1); }
+
+@keyframes m-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes m-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes m-grow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes m-reveal { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+@keyframes m-tab { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes m-pop { from { opacity: 0; transform: scale(0.94); } to { opacity: 1; transform: none; } }
+
+/* Each tab's content rises in as one unit; the blocks on the page cascade in on first load. */
+.t-app .t-view { animation: m-rise 0.4s var(--t-out) both; }
+.t-app .t-main > :nth-child(1) { animation: m-rise 0.45s var(--t-out) both; }
+.t-app .t-main > :nth-child(2) { animation: m-rise 0.45s var(--t-out) 60ms both; }
+.t-app .t-main > :nth-child(3) { animation: m-rise 0.45s var(--t-out) 120ms both; }
+.t-app .t-main > :nth-child(4) { animation: m-rise 0.45s var(--t-out) 180ms both; }
+.t-app .t-main > .t-view { animation: m-rise 0.4s var(--t-out) both; }
+.t-app .td-page > * { animation: m-rise 0.45s var(--t-out) both; }
+.t-app .td-page > :nth-child(2) { animation-delay: 60ms; }
+.t-app .td-page > :nth-child(3) { animation-delay: 120ms; }
+.t-app .td-page > :nth-child(4) { animation-delay: 180ms; }
+.t-app .td-page > :nth-child(n+5) { animation-delay: 220ms; }
+
+/* Rows glide to their new place when the order changes. */
+.t-app .t-row { transition: transform 0.55s var(--t-out), background-color 0.15s; }
+.t-app .t-card { transition: transform 0.5s var(--t-out); }
+
+/* Detail panel: slides in once, and its contents fade as you move between coins. */
+.t-app .t-detail { animation: t-panel-in 0.4s var(--t-out); }
+.t-app .t-detail > * { animation: m-fade 0.3s var(--t-out) both; }
+.t-app .t-sheet { animation: m-rise 0.35s var(--t-out) both; }
+.t-app .t-dialog, .t-app .pl-box { animation: m-pop 0.25s var(--t-out) both; }
+
+/* Tabs: the underline grows in from the left. */
+.t-app .t-tab[aria-selected="true"]::after { transform-origin: left; animation: m-tab 0.35s var(--t-out) both; }
+
+/* Charts draw in left to right; bars grow from the baseline. */
+.t-app .tr-plot svg, .t-app .t-spark, .t-app .sp, .t-app .ps-strip { animation: m-reveal 0.9s var(--t-out) both; }
+.t-app .cal-stack { transform-origin: bottom; animation: m-grow 0.7s var(--t-out) both; animation-delay: calc(var(--i, 0) * 22ms); }
+.t-app .ps-strip i { transform-origin: bottom; animation: m-grow 0.6s var(--t-out) both; }
+.t-app .bt-bar i { transform-origin: left; animation: m-tab 0.8s var(--t-out) both; }
+
+/* Heatmap cells and ticker items fade in down the table. */
+.t-app .hm-cell, .t-app .hm-coin { animation: m-fade 0.5s var(--t-out) both; animation-delay: calc(var(--d, 0) * 28ms); }
+.t-app .dp-cell { animation: m-pop 0.4s var(--t-out) both; }
+.t-app .cal-best, .t-app .ps-pos, .t-app .hl-card, .t-app .t-best-card { animation: m-rise 0.5s var(--t-out) both; }
+.t-app .hl-card:nth-child(2) { animation-delay: 50ms; } .t-app .hl-card:nth-child(3) { animation-delay: 100ms; } .t-app .hl-card:nth-child(4) { animation-delay: 150ms; } .t-app .hl-card:nth-child(5) { animation-delay: 200ms; }
+.t-app .t-best-card:nth-child(2) { animation-delay: 70ms; } .t-app .t-best-card:nth-child(3) { animation-delay: 140ms; }
+
+/* Skeletons shimmer and then give way to content that fades in. */
+.t-app .t-skel { animation: t-shimmer 1.4s linear infinite; }
+
+/* Interaction: hover lift on cards, press feedback everywhere. */
+.t-app .t-best-card, .t-app .ps-pos, .t-app .cal-stat-action, .t-app .hl-card { transition: transform 0.3s var(--t-out), border-color 0.2s; }
+@media (hover: hover) {
+  .t-app .t-best-card:hover, .t-app .ps-pos:hover, .t-app .cal-stat-action:not(:disabled):hover { transform: translateY(-2px); }
+}
+.t-app .cal-bar { transition: background-color 0.2s, transform 0.3s var(--t-out); }
+.t-app .cal-bar:not(:disabled):active { transform: scale(0.95); }
