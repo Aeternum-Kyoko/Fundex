@@ -12,6 +12,8 @@ TradeMode = Literal["paper", "live"]
 TradeScenario = Literal["best", "reverse"]
 TradeSessionStatus = Literal["armed", "entering", "entered", "exiting", "completed", "failed", "cancelled"]
 TradeLegStatus = Literal["pending", "submitted", "filled", "closed", "failed", "skipped"]
+TradeStrategy = Literal["capture", "hold"]
+FundingStatus = Literal["not_applicable", "pending", "settled", "partly_estimated", "estimated"]
 
 
 class TradeScheduleRequest(BaseModel):
@@ -31,6 +33,8 @@ class TradeCreateRequest(BaseModel):
     selected_exchanges: list[ExchangeName] = Field(default_factory=list)
     mode: TradeMode = "paper"
     scenario: TradeScenario = "best"
+    # capture = the next-settlement setup shown on the dashboard; hold = the multi-day hedge.
+    strategy: TradeStrategy = "capture"
     capital_usd: float = 1000
     leverage: float = 2
     leverage_overrides: dict[ExchangeName, float] = Field(default_factory=dict)
@@ -88,8 +92,21 @@ class TradeLegExecution(BaseModel):
     exit_order_id: str | None = None
     entry_fill_price: float | None = None
     exit_fill_price: float | None = None
+    # Order-book mid at the moment of each fill, to measure real slippage.
+    entry_mid_price: float | None = None
+    exit_mid_price: float | None = None
     raw_entry_response: dict[str, Any] | None = None
     raw_exit_response: dict[str, Any] | None = None
+
+
+class FundingLegResult(BaseModel):
+    exchange: ExchangeName
+    side: Literal["long", "short"]
+    settles_at: datetime
+    predicted_rate: float
+    actual_rate: float | None = None
+    source: Literal["pending", "exchange_history", "post_settlement_feed", "estimate"] = "pending"
+    payment_usd: float | None = None
 
 
 class TradeSessionResponse(BaseModel):
@@ -116,6 +133,11 @@ class TradeSessionResponse(BaseModel):
     realized_funding_pnl_usd: float | None = None
     realized_total_fees_usd: float | None = None
     realized_net_pnl_usd: float | None = None
+    strategy: TradeStrategy = "hold"
+    funding_status: FundingStatus = "not_applicable"
+    funding_legs: list[FundingLegResult] = Field(default_factory=list)
+    expected_slippage_usd: float | None = None
+    realized_slippage_usd: float | None = None
     warnings: list[str] = Field(default_factory=list)
     events: list[TradeEvent] = Field(default_factory=list)
     long_leg: TradeLegExecution

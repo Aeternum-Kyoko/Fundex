@@ -1,31 +1,64 @@
-import React from "react";
+import React, { lazy, Suspense } from "react";
 import ReactDOM from "react-dom/client";
-import { App } from "./App";
 import { LoginGate } from "./components/LoginGate";
-import { SymbolComparisonPage } from "./pages/SymbolComparisonPage";
-import { SymbolTradePage } from "./pages/SymbolTradePage";
-import { TradeLandingPage } from "./pages/TradeLandingPage";
+import { PageFrame } from "./terminal/SiteHeader";
+import { Terminal } from "./terminal/Terminal";
 import "./styles.css";
+
+// Compare and Trade pull in PDF/export libraries; load them only when visited.
+const ComparePage = lazy(() => import("./terminal/ComparePage").then((module) => ({ default: module.ComparePage })));
+const SymbolTradePage = lazy(() => import("./pages/SymbolTradePage").then((module) => ({ default: module.SymbolTradePage })));
+const Performance = lazy(() => import("./terminal/Performance").then((module) => ({ default: module.Performance })));
+const Backtest = lazy(() => import("./terminal/Backtest").then((module) => ({ default: module.Backtest })));
+const TradeHub = lazy(() => import("./terminal/TradeHub").then((module) => ({ default: module.TradeHub })));
 
 function resolveRoute() {
   const pathname = window.location.pathname;
   if (pathname.startsWith("/compare/")) {
     const canonicalSymbol = decodeURIComponent(pathname.replace("/compare/", "").trim());
-    return <SymbolComparisonPage key={pathname} canonicalSymbol={canonicalSymbol} />;
+    return (
+      <PageFrame active="compare">
+        <ComparePage key={pathname} canonicalSymbol={canonicalSymbol} />
+      </PageFrame>
+    );
+  }
+  if (pathname === "/backtest") {
+    return (
+      <PageFrame active="backtest">
+        <Backtest />
+      </PageFrame>
+    );
+  }
+  if (pathname === "/performance") {
+    return (
+      <PageFrame active="performance">
+        <Performance />
+      </PageFrame>
+    );
   }
   if (pathname === "/trade") {
-    return <TradeLandingPage key={pathname} />;
+    return (
+      <PageFrame active="trade">
+        <TradeHub key={pathname} />
+      </PageFrame>
+    );
   }
   if (pathname.startsWith("/trade/")) {
     const canonicalSymbol = decodeURIComponent(pathname.replace("/trade/", "").trim());
-    return <SymbolTradePage key={pathname} canonicalSymbol={canonicalSymbol} />;
+    return (
+      <PageFrame active="trade">
+        <SymbolTradePage key={pathname} canonicalSymbol={canonicalSymbol} />
+      </PageFrame>
+    );
   }
 
-  return <App key={pathname} />;
+  return <Terminal key={pathname} />;
 }
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <LoginGate>{resolveRoute()}</LoginGate>
+    <LoginGate>
+      <Suspense fallback={<div className="t-app" style={{ minHeight: "100vh" }} />}>{resolveRoute()}</Suspense>
+    </LoginGate>
   </React.StrictMode>,
 );

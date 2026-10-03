@@ -33,8 +33,8 @@ class TelegramCommandTests(unittest.IsolatedAsyncioTestCase):
     async def test_coin_query_does_not_fall_through_to_solv(self) -> None:
         reply = await self.service.build_reply("chat-1", "SOL", [], self.opportunities)
 
-        self.assertIn("SOL-USDT-PERP", reply)
-        self.assertNotIn("SOLV-USDT-PERP", reply)
+        self.assertIn("<b>SOL</b>", reply)
+        self.assertNotIn("SOLV", reply)
 
     async def test_ambiguous_query_requests_full_symbol(self) -> None:
         match, error = self.service.find_opportunity("SOLU", self.opportunities)
@@ -52,7 +52,7 @@ class TelegramCommandTests(unittest.IsolatedAsyncioTestCase):
         reply = await self.service.build_reply("chat-1", "/coindcx", snapshots, self.opportunities)
 
         self.assertIn("CoinDCX", reply)
-        self.assertIn("BTC-USDT-PERP", reply)
+        self.assertIn("BTC +", reply)
 
     async def test_coinswitch_command_returns_a_coinswitch_section(self) -> None:
         snapshots = [
@@ -63,7 +63,7 @@ class TelegramCommandTests(unittest.IsolatedAsyncioTestCase):
         reply = await self.service.build_reply("chat-1", "/coinswitch", snapshots, self.opportunities)
 
         self.assertIn("CoinSwitch", reply)
-        self.assertIn("BTC-USDT-PERP", reply)
+        self.assertIn("BTC +", reply)
 
     async def test_compare_command_shows_all_exchange_sections(self) -> None:
         snapshots = [
@@ -83,11 +83,11 @@ class TelegramCommandTests(unittest.IsolatedAsyncioTestCase):
 
         reply = await self.service.build_reply("chat-1", "/compare BTC", snapshots, opportunities)
 
-        self.assertIn("Exchange comparison", reply)
+        self.assertIn("across exchanges", reply)
         self.assertIn("Binance", reply)
         self.assertIn("Delta Exchange India", reply)
         self.assertIn("CoinDCX", reply)
-        self.assertIn("Best live pair", reply)
+        self.assertIn("Hold 7 days", reply)
 
     async def test_compare_command_marks_missing_exchange_as_not_listed(self) -> None:
         snapshots = [
@@ -107,7 +107,7 @@ class TelegramCommandTests(unittest.IsolatedAsyncioTestCase):
         reply = await self.service.build_reply("chat-1", "/compare BTC", snapshots, opportunities)
 
         self.assertIn("CoinDCX", reply)
-        self.assertIn("Not listed right now for this symbol.", reply)
+        self.assertIn("not listed", reply)
 
     async def test_compare_command_formats_flat_funding_without_zero_percent(self) -> None:
         snapshots = [
@@ -127,8 +127,8 @@ class TelegramCommandTests(unittest.IsolatedAsyncioTestCase):
 
         reply = await self.service.build_reply("chat-1", "/compare BTC", snapshots, opportunities)
 
-        self.assertIn("Funding rate - flat", reply)
-        self.assertNotIn("Funding rate - 0.000%", reply)
+        self.assertIn("flat / 8h", reply)
+        self.assertNotIn("0.0000% / 8h", reply)
 
     async def test_status_command_reports_watchlist_and_alerts(self) -> None:
         await self.store.add_watch_symbol("chat-1", "BTC-USDT-PERP")

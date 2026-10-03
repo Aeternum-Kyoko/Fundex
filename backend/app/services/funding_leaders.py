@@ -18,7 +18,7 @@ def build_funding_leaders(
     if exchanges_to_include is None:
         exchanges_to_include = tuple(
             exchange
-            for exchange in ("binance", "delta", "coindcx", "coinswitch")
+            for exchange in ("binance", "delta", "coindcx", "coinswitch", "wazirx")
             if exchange in grouped
         )
 
@@ -55,6 +55,7 @@ def _to_funding_leader(snapshot: FundingSnapshot) -> FundingLeader:
                 exchange_symbol=snapshot.exchange_symbol,
                 base_asset=snapshot.base_asset,
                 funding_rate=snapshot.funding_rate,
+                funding_interval_hours=snapshot.funding_interval_hours,
                 max_leverage=snapshot.max_leverage,
                 next_funding_time=snapshot.next_funding_time,
                 mark_price=snapshot.mark_price,

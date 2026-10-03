@@ -6,6 +6,20 @@ from app.core.config import Settings
 from app.models.market import ArbitrageOpportunity, FundingSnapshot
 from app.services.funding_leaders import build_funding_leaders
 from app.services.history_store import HistoryStore
+from app.services.liquidity import enabled_exchange_names
+from app.services.telegram_format import (
+    SHORT_NAMES,
+    capture_lines,
+    countdown,
+    hold_lines,
+    leg_line,
+    local_time,
+    rate_with_interval,
+    signed_pct,
+    trust_line,
+    usd,
+    who_pays,
+)
 from app.services.opportunity_ranker import is_snapshot_usable
 from app.services.symbol_registry import build_symbol_aliases, normalize_symbol_query
 
@@ -15,6 +29,7 @@ DISPLAY_NAMES = {
     "delta": "Delta Exchange India",
     "coindcx": "CoinDCX",
     "coinswitch": "CoinSwitch",
+    "wazirx": "WazirX",
 }
 
 
@@ -64,9 +79,20 @@ def format_funding_rate(rate: float | None) -> str:
 
 
 class TelegramCommandService:
-    def __init__(self, history_store: HistoryStore, settings: Settings) -> None:
+    def __init__(self, history_store: HistoryStore, settings: Settings, ranking_context=None, journal=None) -> None:
         self.history_store = history_store
         self.settings = settings
+        self.ranking_context = ranking_context
+        # Trade journal (set by the app) so /trades and /pnl can report paper and live results.
+        self.journal = journal
+
+    @property
+    def _tz(self) -> str:
+        return self.settings.telegram_daily_summary_timezone
+
+    @property
+    def _notional(self) -> float:
+        return self.settings.liquidity_reference_notional_usd
 
     async def build_reply(
         self,
@@ -104,6 +130,18 @@ class TelegramCommandService:
 
         if upper == "/COINSWITCH":
             return self._format_single_exchange_funding(snapshots, "coinswitch")
+
+        if upper == "/WAZIRX":
+            return self._format_single_exchange_funding(snapshots, "wazirx")
+
+        if upper in {"/NEXT", "/SOON"}:
+            return self._format_next_settlements(opportunities)
+
+        if upper in {"/TRADES", "/RESULTS"}:
+            return await self._format_trades()
+
+        if upper == "/PNL":
+            return await self._format_pnl()
 
         if upper.startswith("/WATCH "):
             symbol_query = normalized.split(maxsplit=1)[1].strip()
@@ -168,24 +206,20 @@ class TelegramCommandService:
 
     def help_text(self) -> str:
         return (
-            "<b>ArbRadar bot commands</b>\n\n"
-            "/coin BTC - best live pair for a coin\n"
-            "/compare BTC - compare one coin across all active exchanges\n"
-            "/toppositive - top positive funding across active exchanges\n"
-            "/topnegative - top negative funding across active exchanges\n"
-            "/binance - Binance positive and negative leaders\n"
-            "/delta - Delta positive and negative leaders\n"
-            "/coindcx - CoinDCX positive and negative leaders\n"
-            "/coinswitch - CoinSwitch positive and negative leaders\n"
-            "/exchanges - list active exchanges in the bot\n"
-            "/status - show your alert and watchlist status\n"
-            "/commands - show this help again\n"
-            "/watch BTC - add a symbol to your watchlist\n"
-            "/unwatch BTC - remove a symbol from your watchlist\n"
-            "/watchlist - show your watchlist\n"
-            "/alerts - show alert status for this chat\n"
-            "/alerts on - enable automatic alerts for this chat\n"
-            "/alerts off - disable automatic alerts for this chat"
+            "<b>Fundex bot</b>\n\n"
+            "<b>Find a trade</b>\n"
+            "/next - settlements coming up that pay the most\n"
+            "/coin BTC - next settlement and hold setup for a coin\n"
+            "/compare BTC - every exchange's rate, interval and timing\n"
+            "/toppositive, /topnegative - funding leaders\n"
+            "/binance /delta /coindcx /wazirx /coinswitch - one exchange's leaders\n\n"
+            "<b>Your results</b>\n"
+            "/trades - recent paper and live trades\n"
+            "/pnl - last 7 days, paper and live\n\n"
+            "<b>Alerts</b>\n"
+            "/alerts on, /alerts off - automatic alerts for this chat\n"
+            "/watch BTC, /unwatch BTC, /watchlist\n"
+            "/status, /exchanges, /commands"
         )
 
     def find_opportunity(
@@ -296,23 +330,17 @@ class TelegramCommandService:
         return None, error
 
     def _format_coin_reply(self, match: ArbitrageOpportunity) -> str:
-        next_funding_time = earliest_funding_time(match)
         now = datetime.now(timezone.utc)
-        return (
-            f"<b>{match.canonical_symbol}</b>\n\n"
-            f"Symbol - {match.canonical_symbol}\n"
-            f"Spread - {match.spread_rate * 100:.3f}%\n"
-            f"{exchange_symbol_lines(match)[0]}\n"
-            f"{exchange_symbol_lines(match)[1]}\n"
-            f"{exchange_rate_lines(match)[0]}\n"
-            f"{exchange_rate_lines(match)[1]}\n"
-            f"Buy / Long - {match.long_leg.display_name}\n"
-            f"Sell / Short - {match.short_leg.display_name}\n"
-            f"Exchanges - {match.long_leg.display_name}, {match.short_leg.display_name}\n"
-            f"Net APR - {match.net_apr_percent:.2f}%\n"
-            f"Confidence - {match.confidence_score * 100:.0f}/100\n"
-            f"Funding expiry - {format_countdown(next_funding_time, now)}"
-        )
+        parts = [f"<b>{match.base_asset}</b>", ""]
+        if match.capture is not None and match.capture.capture_percent > 0:
+            parts.extend(capture_lines(match.capture, self._notional, self._tz, now))
+            parts.append(trust_line(match, capture=True))
+            parts.append("")
+        parts.extend(hold_lines(match, self._notional))
+        parts.append(leg_line("Long", match.long_leg))
+        parts.append(leg_line("Short", match.short_leg))
+        parts.append(trust_line(match))
+        return "\n".join(parts)
 
     def _format_compare_reply(
         self,
@@ -335,44 +363,34 @@ class TelegramCommandService:
         now = datetime.now(timezone.utc)
         opportunity = next((item for item in opportunities if item.canonical_symbol == canonical_symbol), None)
 
-        parts = [f"<b>{canonical_symbol}</b>", "", "<b>Exchange comparison</b>"]
+        parts = [f"<b>{canonical_symbol.split('-')[0]} across exchanges</b>"]
         snapshot_map = {snapshot.exchange: snapshot for snapshot in matching_snapshots}
-        for exchange in self.settings.enabled_exchange_names:
+        for exchange in enabled_exchange_names(self.settings, self.ranking_context):
             snapshot = snapshot_map.get(exchange)
-            parts.extend(["", f"<b>{self._display_name(exchange)}</b>"])
             if snapshot is None:
-                parts.append("Not listed right now for this symbol.")
+                parts.append(f"<b>{self._display_name(exchange)}</b>: not listed")
                 continue
+            parts.append(f"<b>{self._display_name(exchange)}</b>")
 
-            parts.extend(
-                [
-                    f"Symbol - {snapshot.exchange_symbol}",
-                    f"Funding rate - {format_funding_rate(snapshot.funding_rate)}",
-                    f"Mark price - {self._format_number(snapshot.mark_price)}",
-                    f"Open interest - {self._format_usd(snapshot.open_interest_usd)}",
-                    f"Next funding - {format_countdown(snapshot.next_funding_time, now)}",
-                ]
+            parts.append(
+                f"{snapshot.exchange_symbol}: {rate_with_interval(snapshot.funding_rate, snapshot.funding_interval_hours)}, "
+                f"settles {local_time(snapshot.next_funding_time, self._tz)} (in {countdown(snapshot.next_funding_time, now)}), "
+                f"mark {self._format_number(snapshot.mark_price)}, OI {self._format_usd(snapshot.open_interest_usd)}"
             )
 
         if opportunity is not None:
-            next_funding_time = earliest_funding_time(opportunity)
-            parts.extend(
-                [
-                    "",
-                    "<b>Best live pair</b>",
-                    f"Spread - {opportunity.spread_rate * 100:.3f}%",
-                    f"Buy / Long - {opportunity.long_leg.display_name}",
-                    f"Sell / Short - {opportunity.short_leg.display_name}",
-                    f"Net APR - {opportunity.net_apr_percent:.2f}%",
-                    f"Funding expiry - {format_countdown(next_funding_time, now)}",
-                ]
-            )
+            parts.append("")
+            if opportunity.capture is not None and opportunity.capture.capture_percent > 0:
+                parts.extend(capture_lines(opportunity.capture, self._notional, self._tz, now))
+                parts.append("")
+            parts.extend(hold_lines(opportunity, self._notional))
+            parts.append(trust_line(opportunity))
 
         return "\n".join(parts)
 
     def _format_multi_exchange_funding(self, snapshots: list[FundingSnapshot], *, positive: bool) -> str:
         leaders = build_funding_leaders(snapshots, limit=5)
-        title = "Top Positive Funding" if positive else "Top Negative Funding"
+        title = "Highest funding (shorts get paid)" if positive else "Lowest funding (longs get paid)"
         parts = [f"<b>{title}</b>"]
         for exchange in leaders.exchanges:
             selected = exchange.top_positive if positive else exchange.top_negative
@@ -381,23 +399,78 @@ class TelegramCommandService:
                 parts.append("No symbols right now.")
                 continue
             for item in selected:
-                parts.append(f"{item.canonical_symbol} - {item.funding_rate * 100:.3f}%")
+                parts.append(f"{item.base_asset} {rate_with_interval(item.funding_rate, item.funding_interval_hours)}")
         return "\n".join(parts)
 
     def _format_single_exchange_funding(self, snapshots: list[FundingSnapshot], exchange_name: str) -> str:
         leaders = build_funding_leaders(snapshots, limit=5, exchanges_to_include=(exchange_name,))
         exchange = leaders.exchanges[0]
-        parts = [f"<b>{exchange.display_name}</b>", "", "<b>Top Positive</b>"]
+        parts = [f"<b>{exchange.display_name}</b>", "", "<b>Shorts get paid most</b>"]
         parts.extend(
-            [f"{item.canonical_symbol} - {item.funding_rate * 100:.3f}%" for item in exchange.top_positive]
+            [f"{item.base_asset} {rate_with_interval(item.funding_rate, item.funding_interval_hours)}" for item in exchange.top_positive]
             or ["No positive symbols right now."]
         )
-        parts.extend(["", "<b>Top Negative</b>"])
+        parts.extend(["", "<b>Longs get paid most</b>"])
         parts.extend(
-            [f"{item.canonical_symbol} - {item.funding_rate * 100:.3f}%" for item in exchange.top_negative]
+            [f"{item.base_asset} {rate_with_interval(item.funding_rate, item.funding_interval_hours)}" for item in exchange.top_negative]
             or ["No negative symbols right now."]
         )
         return "\n".join(parts)
+
+    def _format_next_settlements(self, opportunities: list[ArbitrageOpportunity]) -> str:
+        now = datetime.now(timezone.utc)
+        rows = sorted(
+            (item for item in opportunities if item.capture is not None and item.capture.capture_percent >= 0.01),
+            key=lambda item: (item.capture.settles_at, -item.capture.net_percent),  # type: ignore[union-attr]
+        )[:8]
+        if not rows:
+            return "No settlement is paying a meaningful amount right now."
+        parts = [f"<b>Next settlements worth a trade</b> (costs at ${self._notional:,.0f} per leg)", ""]
+        for item in rows:
+            capture = item.capture
+            parts.append(
+                f"<b>{item.base_asset}</b> {local_time(capture.settles_at, self._tz)} (in {countdown(capture.settles_at, now)}): "
+                f"sell {SHORT_NAMES.get(capture.short_leg.exchange)}, buy {SHORT_NAMES.get(capture.long_leg.exchange)}, {who_pays(capture)}. "
+                f"Collect {signed_pct(capture.capture_percent)}, net {usd(capture.net_percent / 100 * self._notional)}"
+            )
+        return "\n".join(parts)
+
+    async def _format_trades(self) -> str:
+        if self.journal is None:
+            return "Trade results are not available on this server."
+        trades = await self.journal.list(limit=6)
+        if not trades:
+            return "No paper or live trades yet. Arm one from the trade desk."
+        parts = ["<b>Recent trades</b>", ""]
+        for trade in trades:
+            result = trade.realized_net_pnl_usd
+            parts.append(
+                f"<b>{trade.canonical_symbol.split('-')[0]}</b> {trade.mode}, {trade.status}: "
+                f"{usd(result) if result is not None else 'planned ' + usd(trade.expected_net_pnl_usd)}"
+                f" ({local_time(trade.created_at, self._tz)})"
+            )
+        return "\n".join(parts)
+
+    async def _format_pnl(self) -> str:
+        if self.journal is None:
+            return "Trade results are not available on this server."
+        since = datetime.now(timezone.utc) - timedelta(days=7)
+        trades = [trade for trade in await self.journal.list(limit=500) if trade.created_at >= since and trade.realized_net_pnl_usd is not None]
+        if not trades:
+            return "No finished trades in the last 7 days."
+        lines = ["<b>Last 7 days</b>", ""]
+        for mode in ("paper", "live"):
+            subset = [trade for trade in trades if trade.mode == mode]
+            if not subset:
+                continue
+            net = sum(trade.realized_net_pnl_usd or 0 for trade in subset)
+            wins = sum(1 for trade in subset if (trade.realized_net_pnl_usd or 0) > 0)
+            funding = sum(trade.realized_funding_pnl_usd or 0 for trade in subset)
+            fees = sum(trade.realized_total_fees_usd or 0 for trade in subset)
+            lines.append(
+                f"<b>{mode.title()}</b>: {len(subset)} trades, {wins} won, net {usd(net)} (funding {usd(funding)}, fees {usd(-fees)})"
+            )
+        return "\n".join(lines)
 
     def _format_exchanges(self, snapshots: list[FundingSnapshot]) -> str:
         exchange_names = sorted({snapshot.exchange for snapshot in snapshots})

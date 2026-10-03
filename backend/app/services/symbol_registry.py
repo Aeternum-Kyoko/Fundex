@@ -12,6 +12,7 @@ DEFAULT_EXCHANGE_QUOTES: dict[ExchangeName, str] = {
     "delta": "USD",
     "coindcx": "USDT",
     "coinswitch": "INR",
+    "wazirx": "USDT",
 }
 STABLE_QUOTE_ALIASES = {
     "USD": "USDT",

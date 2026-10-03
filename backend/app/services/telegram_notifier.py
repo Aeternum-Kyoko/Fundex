@@ -12,6 +12,7 @@ from httpx import AsyncClient
 from app.core.config import Settings
 from app.models.market import ArbitrageOpportunity, FundingSnapshot
 from app.services.history_store import HistoryStore
+from app.services.telegram_format import capture_lines, hold_lines, leg_line, trust_line, usd
 from app.services.telegram_commands import (
     TelegramCommandService,
     earliest_funding_time,
@@ -76,6 +77,7 @@ class TelegramNotifier:
         self._last_error: str | None = None
         self._update_offset: int | None = None
         self._summary_lock = asyncio.Lock()
+        self._capture_alerts_sent: dict[str, datetime] = {}
         self._metrics: dict[str, int] = {
             "notifications_sent": 0,
             "entered_symbols_sent": 0,
@@ -248,7 +250,7 @@ class TelegramNotifier:
             return {"sent": False, "reason": "Telegram is not configured."}
 
         message = text or (
-            "<b>ArbRadar Telegram bot is connected.</b>\n\n"
+            "<b>Fundex Telegram bot is connected.</b>\n\n"
             "You will receive alerts here when spread, confidence, liquidity, "
             "and freshness all meet the configured thresholds."
         )
@@ -582,14 +584,21 @@ class TelegramNotifier:
     def _alert_quality_failures(self, opportunity: ArbitrageOpportunity) -> list[str]:
         reasons: list[str] = []
 
-        if opportunity.spread_rate * 100 < self.settings.telegram_min_spread_percent:
-            reasons.append(f"spread below {self.settings.telegram_min_spread_percent:.2f}%")
+        if self.settings.telegram_min_spread_percent > 0 and opportunity.spread_rate * 100 < self.settings.telegram_min_spread_percent:
+            reasons.append(f"spread below {self.settings.telegram_min_spread_percent:.2f}% per 8h")
 
-        if opportunity.confidence_score < self.settings.telegram_min_confidence_score:
-            reasons.append(f"confidence below {self.settings.telegram_min_confidence_score:.2f}")
+        if opportunity.trust_level == "low":
+            reasons.append("low trust")
+        elif opportunity.confidence_score < self.settings.telegram_min_confidence_score:
+            reasons.append(f"trust score below {self.settings.telegram_min_confidence_score:.2f}")
 
-        combined_oi = opportunity.combined_open_interest_usd or 0.0
-        if combined_oi < self.settings.telegram_min_combined_oi_usd:
+        if opportunity.net_return_percent <= 0:
+            reasons.append(f"not profitable over a {opportunity.holding_horizon_hours}h hold after costs")
+
+        # Only judge open interest where the venues publish it; Binance and WazirX don't, and missing OI is
+        # already reflected in the trust checks.
+        combined_oi = opportunity.combined_open_interest_usd
+        if combined_oi is not None and combined_oi < self.settings.telegram_min_combined_oi_usd:
             reasons.append(f"combined OI below ${self.settings.telegram_min_combined_oi_usd:,.0f}")
 
         max_age = opportunity.max_leg_age_seconds
@@ -629,23 +638,10 @@ class TelegramNotifier:
             parts.extend(["", "<b>Entered alerts</b>"])
             for index, candidate in enumerate(entered, start=1):
                 opportunity = candidate.opportunity
-                next_funding_time = earliest_funding_time(opportunity)
-                parts.extend(
-                    [
-                        "",
-                        f"<b>{index}. {opportunity.canonical_symbol}</b>",
-                        f"Symbol - {opportunity.canonical_symbol}",
-                        f"Spread - {opportunity.spread_rate * 100:.3f}%",
-                        *exchange_symbol_lines(opportunity),
-                        *exchange_rate_lines(opportunity),
-                        f"Buy / Long - {opportunity.long_leg.display_name}",
-                        f"Sell / Short - {opportunity.short_leg.display_name}",
-                        f"Confidence - {opportunity.confidence_score * 100:.0f}/100",
-                        f"Combined OI - ${opportunity.combined_open_interest_usd or 0:,.0f}",
-                        f"Data age - {self._format_age(opportunity.max_leg_age_seconds)}",
-                        f"Funding expiry - {format_countdown(next_funding_time, now)}",
-                    ]
-                )
+                notional = self.settings.liquidity_reference_notional_usd
+                parts.extend(["", f"<b>{index}. {opportunity.base_asset}</b>", *hold_lines(opportunity, notional)])
+                parts.extend([leg_line("Long", opportunity.long_leg), leg_line("Short", opportunity.short_leg)])
+                parts.append(trust_line(opportunity))
 
         if exited:
             parts.extend(["", "<b>Exited alerts</b>"])
@@ -716,6 +712,97 @@ class TelegramNotifier:
             self._metrics["update_errors"] += 1
             logger.exception("Telegram getUpdates failed")
             return None
+
+    async def notify_captures(self, opportunities: list[ArbitrageOpportunity]) -> None:
+        """Heads-up shortly before a settlement whose single capture pays for itself."""
+        if not (self.enabled and self.configured and self.settings.telegram_capture_alerts_enabled):
+            return
+        due = self.due_capture_alerts(opportunities)
+        if not due:
+            return
+        message = self.format_capture_alert(due)
+        try:
+            chat_ids = await self.history_store.get_alert_enabled_chat_ids(self.settings.resolved_telegram_chat_ids)
+            if chat_ids:
+                await self._send_text(message, chat_ids=chat_ids)
+            for opportunity in due:
+                self._capture_alerts_sent[self._capture_key(opportunity)] = datetime.now(timezone.utc)
+        except Exception as exc:  # pragma: no cover
+            self._last_error = str(exc)
+            logger.exception("Telegram capture alert failed")
+
+    @staticmethod
+    def _capture_key(opportunity: ArbitrageOpportunity) -> str:
+        return f"{opportunity.canonical_symbol}@{opportunity.capture.settles_at.isoformat()}"  # type: ignore[union-attr]
+
+    def due_capture_alerts(self, opportunities: list[ArbitrageOpportunity], now: datetime | None = None) -> list[ArbitrageOpportunity]:
+        now = now or datetime.now(timezone.utc)
+        lead = self.settings.telegram_capture_lead_minutes * 60
+        # Forget settlements that have passed.
+        for key, sent_at in list(self._capture_alerts_sent.items()):
+            if (now - sent_at).total_seconds() > 3 * 3600:
+                del self._capture_alerts_sent[key]
+        due = []
+        for opportunity in opportunities:
+            capture = opportunity.capture
+            if capture is None or capture.capture_percent <= 0 or capture.data_trust_level == "low":
+                continue
+            seconds_left = (capture.settles_at - now).total_seconds()
+            if not (60 < seconds_left <= lead):
+                continue
+            if capture.net_percent < self.settings.telegram_min_capture_net_percent:
+                continue
+            if self._capture_key(opportunity) in self._capture_alerts_sent:
+                continue
+            due.append(opportunity)
+        return sorted(due, key=lambda item: -item.capture.net_percent)[:5]  # type: ignore[union-attr]
+
+    def format_capture_alert(self, opportunities: list[ArbitrageOpportunity]) -> str:
+        tz = self.settings.telegram_daily_summary_timezone
+        notional = self.settings.liquidity_reference_notional_usd
+        parts = ["<b>Settling soon, pays for itself</b>"]
+        for opportunity in opportunities:
+            parts.extend(["", f"<b>{opportunity.base_asset}</b>", *capture_lines(opportunity.capture, notional, tz)])  # type: ignore[arg-type]
+            parts.append(trust_line(opportunity, capture=True))
+        parts.extend(["", "Arm it on the trade desk: it enters about 30s before and exits about 15s after."])
+        return "\n".join(parts)
+
+    async def notify_trade(self, session, kind: str) -> None:
+        """kind: completed | settled | failed."""
+        if not (self.enabled and self.configured and self.settings.telegram_trade_notifications):
+            return
+        try:
+            await self._send_text(self.format_trade_message(session, kind))
+        except Exception as exc:  # pragma: no cover
+            self._last_error = str(exc)
+            logger.exception("Telegram trade notification failed")
+
+    @staticmethod
+    def format_trade_message(session, kind: str) -> str:
+        base = session.canonical_symbol.split("-")[0]
+        mode = "Live" if session.mode == "live" else "Paper"
+        if kind == "failed":
+            last = session.events[-1].message if session.events else session.current_phase
+            prefix = "⚠️ " if session.mode == "live" else ""
+            return f"{prefix}<b>{mode} trade {base} failed</b>\n{last}"
+        net = session.realized_net_pnl_usd
+        title = "settled" if kind == "settled" else "finished"
+        lines = [
+            f"<b>{mode} trade {base} {title}: {usd(net)}</b>",
+            f"Funding {usd(session.realized_funding_pnl_usd)}, price {usd(session.realized_price_pnl_usd)}, fees {usd(-(session.realized_total_fees_usd or 0))}",
+            f"Planned {usd(session.expected_net_pnl_usd)}",
+        ]
+        if kind == "settled" and session.funding_legs:
+            lines.append(
+                "Funding: "
+                + ", ".join(
+                    f"{leg.exchange} {leg.side} predicted {leg.predicted_rate * 100:+.4f}% settled {(leg.actual_rate or 0) * 100:+.4f}%"
+                    for leg in session.funding_legs
+                )
+            )
+        elif kind == "completed" and session.funding_legs:
+            lines.append("Funding is the prediction until the settled rate is published.")
+        return "\n".join(lines)
 
     async def _send_text(self, text: str, chat_ids: list[str] | None = None) -> None:
         if not self.settings.telegram_bot_token:

@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 
 from app.models.execution import ExecutionPlanResponse
 from app.models.market import (
@@ -25,16 +26,17 @@ from app.models.trade import (
     TradeSessionResponse,
 )
 from app.services.arbitrage import build_opportunities
+from app.services.backtest import BacktestParams
 from app.services.execution import build_execution_plan, reverse_opportunity
 from app.services.funding_leaders import build_funding_leaders
 from app.services.links import exchange_display_name, exchange_trade_url
-from app.services.opportunity_ranker import is_snapshot_usable
+from app.services.opportunity_ranker import capture_opportunity, is_snapshot_usable
 
 router = APIRouter()
 
 
 def _enabled_exchanges(request: Request) -> list[str]:
-    return request.app.state.settings.enabled_exchange_names
+    return request.app.state.market_engine.enabled_exchange_names()
 
 
 def _resolved_exchanges(request: Request, exchanges: str | None = None) -> list[str]:
@@ -72,7 +74,7 @@ async def exchange_status(request: Request) -> list[dict]:
 async def arbitrage_opportunities(request: Request, exchanges: str | None = None) -> OpportunitiesResponse:
     selected_exchanges = _resolved_exchanges(request, exchanges)
     snapshots = await _snapshots_for_exchanges(request, selected_exchanges)
-    opportunities = build_opportunities(snapshots, request.app.state.settings)
+    opportunities = build_opportunities(snapshots, request.app.state.settings, request.app.state.market_engine.ranking_context)
 
     return OpportunitiesResponse(
         total=len(opportunities),
@@ -98,27 +100,7 @@ async def exchange_funding_leaders(request: Request, limit: int = 5, exchanges: 
 async def exchange_funding_settlements(request: Request, limit: int = 12, exchanges: str | None = None) -> FundingSettlementResponse:
     selected_exchanges = _resolved_exchanges(request, exchanges)
     snapshots = await _snapshots_for_exchanges(request, selected_exchanges)
-    now = datetime.now(timezone.utc)
-    resolved_limit = max(1, min(limit, 40))
-    items = [
-        FundingSettlementItem(
-            exchange=snapshot.exchange,
-            display_name=exchange_display_name(snapshot.exchange),
-            canonical_symbol=snapshot.canonical_symbol,
-            exchange_symbol=snapshot.exchange_symbol,
-            funding_rate=snapshot.funding_rate,
-            funding_interval_hours=snapshot.funding_interval_hours,
-            max_leverage=snapshot.max_leverage,
-            next_funding_time=snapshot.next_funding_time,
-            mark_price=snapshot.mark_price,
-            open_interest_usd=snapshot.open_interest_usd,
-            trade_url=exchange_trade_url(snapshot.exchange, snapshot.exchange_symbol),
-        )
-        for snapshot in sorted(
-            [item for item in snapshots if item.next_funding_time is not None and item.next_funding_time >= now],
-            key=lambda item: (item.next_funding_time or datetime.max.replace(tzinfo=timezone.utc), -abs(item.funding_rate), item.canonical_symbol, item.exchange),
-        )[:resolved_limit]
-    ]
+    items = _settlement_items(snapshots, max(1, min(limit, 40)))
     return FundingSettlementResponse(total=len(items), items=items)
 
 
@@ -136,27 +118,77 @@ async def exchange_funding_trends(
     return FundingTrendsResponse(total_series=len(series), series=series)
 
 
+def _settlement_items(snapshots: list, limit: int) -> list[FundingSettlementItem]:
+    now = datetime.now(timezone.utc)
+    upcoming = sorted(
+        [item for item in snapshots if item.next_funding_time is not None and item.next_funding_time >= now],
+        key=lambda item: (item.next_funding_time, -abs(item.funding_rate), item.canonical_symbol, item.exchange),
+    )[:limit]
+    return [
+        FundingSettlementItem(
+            exchange=snapshot.exchange,
+            display_name=exchange_display_name(snapshot.exchange),
+            canonical_symbol=snapshot.canonical_symbol,
+            exchange_symbol=snapshot.exchange_symbol,
+            funding_rate=snapshot.funding_rate,
+            funding_interval_hours=snapshot.funding_interval_hours,
+            max_leverage=snapshot.max_leverage,
+            next_funding_time=snapshot.next_funding_time,
+            mark_price=snapshot.mark_price,
+            open_interest_usd=snapshot.open_interest_usd,
+            trade_url=exchange_trade_url(snapshot.exchange, snapshot.exchange_symbol),
+        )
+        for snapshot in upcoming
+    ]
+
+
+@router.get("/dashboard")
+async def dashboard(request: Request, exchanges: str | None = None) -> dict:
+    """Everything the main screen needs in one (gzipped) response."""
+    engine = request.app.state.market_engine
+    settings = request.app.state.settings
+    selected_exchanges = _resolved_exchanges(request, exchanges)
+    snapshots = await _snapshots_for_exchanges(request, selected_exchanges)
+    opportunities = build_opportunities(snapshots, settings, engine.ranking_context)
+    statuses = await request.app.state.market_store.get_statuses()
+    leaders = build_funding_leaders(snapshots, limit=8, exchanges_to_include=tuple(selected_exchanges))
+    return {
+        "version": engine.data_version,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "selected_exchanges": selected_exchanges,
+        "available_exchanges": engine.enabled_exchange_names(),
+        "holding_horizon_hours": settings.holding_horizon_hours,
+        "reference_notional_usd": settings.liquidity_reference_notional_usd,
+        "statuses": [status.model_dump(mode="json") for status in statuses],
+        "opportunities": [opportunity.model_dump(mode="json") for opportunity in opportunities],
+        "leaders": leaders.model_dump(mode="json")["exchanges"],
+        "settlements": [item.model_dump(mode="json") for item in _settlement_items(snapshots, 40)],
+    }
+
+
 @router.get("/stream")
-async def stream_opportunities(request: Request) -> StreamingResponse:
+async def stream_changes(request: Request) -> StreamingResponse:
+    """Tiny change notifications; clients refetch /dashboard when the version moves."""
+    engine = request.app.state.market_engine
+
     async def event_generator():
-        while True:
-            if await request.is_disconnected():
-                break
+        version = -1
+        opened = asyncio.get_running_loop().time()
+        yield "retry: 3000\n\n"
+        # Each connection lives at most 5 minutes; EventSource reconnects on its own. Keeps shutdowns prompt.
+        while not await request.is_disconnected() and asyncio.get_running_loop().time() - opened < 300:
+            new_version = await engine.wait_for_change(version, timeout=15.0)
+            if new_version != version:
+                version = new_version
+                yield f"event: version\ndata: {json.dumps({'version': version})}\n\n"
+            else:
+                yield ": keep-alive\n\n"
 
-            selected_exchanges = _resolved_exchanges(request, request.query_params.get("exchanges"))
-            snapshots = await _snapshots_for_exchanges(request, selected_exchanges)
-            opportunities = build_opportunities(snapshots, request.app.state.settings)
-            payload = OpportunitiesResponse(
-                total=len(opportunities),
-                exchanges_in_backend=selected_exchanges,
-                frontend_optional_exchanges=[],
-                opportunities=opportunities,
-            )
-
-            yield f"data: {json.dumps(payload.model_dump(mode='json'))}\n\n"
-            await asyncio.sleep(5)
-
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/opportunities/{canonical_symbol}/history", response_model=OpportunityHistoryResponse)
@@ -167,7 +199,9 @@ async def opportunity_history(request: Request, canonical_symbol: str, limit: in
 
 
 @router.get("/symbols/{canonical_symbol}/comparison", response_model=SymbolComparisonResponse)
-async def symbol_comparison(request: Request, canonical_symbol: str, exchanges: str | None = None) -> SymbolComparisonResponse:
+async def symbol_comparison(
+    request: Request, canonical_symbol: str, exchanges: str | None = None, strategy: str = "hold"
+) -> SymbolComparisonResponse:
     selected_exchanges = _resolved_exchanges(request, exchanges)
     snapshots = await _snapshots_for_exchanges(request, selected_exchanges)
     normalized_symbol = canonical_symbol.upper()
@@ -180,8 +214,12 @@ async def symbol_comparison(request: Request, canonical_symbol: str, exchanges: 
     if not symbol_snapshots:
         raise HTTPException(status_code=404, detail="Symbol not found in the current live comparison set.")
 
-    opportunities = build_opportunities(snapshots, request.app.state.settings)
+    opportunities = build_opportunities(snapshots, request.app.state.settings, request.app.state.market_engine.ranking_context)
     best_opportunity = next((item for item in opportunities if item.canonical_symbol.upper() == normalized_symbol), None)
+    if strategy == "capture" and best_opportunity is not None:
+        best_opportunity = capture_opportunity(
+            best_opportunity, snapshots, request.app.state.settings, request.app.state.market_engine.ranking_context
+        ) or best_opportunity
     now = datetime.now(timezone.utc)
 
     comparison_rows = [
@@ -225,7 +263,7 @@ async def telegram_status(request: Request) -> dict:
 @router.get("/telegram/preview")
 async def telegram_preview(request: Request) -> dict:
     snapshots = await request.app.state.market_store.get_snapshots()
-    opportunities = build_opportunities(snapshots, request.app.state.settings)
+    opportunities = build_opportunities(snapshots, request.app.state.settings, request.app.state.market_engine.ranking_context)
     batch = request.app.state.telegram_notifier.preview(opportunities)
 
     if batch is None:
@@ -245,7 +283,7 @@ async def telegram_preview(request: Request) -> dict:
 @router.get("/telegram/daily-summary-preview")
 async def telegram_daily_summary_preview(request: Request, summary_key: str | None = None) -> dict:
     snapshots = await request.app.state.market_store.get_snapshots()
-    opportunities = build_opportunities(snapshots, request.app.state.settings)
+    opportunities = build_opportunities(snapshots, request.app.state.settings, request.app.state.market_engine.ranking_context)
     batch = await request.app.state.telegram_notifier.preview_daily_summary(snapshots, opportunities, summary_key=summary_key)
 
     if batch is None:
@@ -287,7 +325,7 @@ async def telegram_demo_alert(request: Request) -> dict:
 @router.post("/telegram/send-daily-summary")
 async def telegram_send_daily_summary(request: Request, summary_key: str | None = None) -> dict:
     snapshots = await request.app.state.market_store.get_snapshots()
-    opportunities = build_opportunities(snapshots, request.app.state.settings)
+    opportunities = build_opportunities(snapshots, request.app.state.settings, request.app.state.market_engine.ranking_context)
     return await request.app.state.telegram_notifier.send_daily_summary_now(
         snapshots,
         opportunities,
@@ -307,13 +345,24 @@ async def execution_plan(
     holding_periods: int = 3,
     basis_risk_buffer_percent: float = 0.35,
     reverse: bool = False,
+    strategy: str = "hold",
 ) -> ExecutionPlanResponse:
     selected_exchanges = _resolved_exchanges(request, exchanges)
     snapshots = await _snapshots_for_exchanges(request, selected_exchanges)
-    opportunities = build_opportunities(snapshots, request.app.state.settings)
+    opportunities = build_opportunities(snapshots, request.app.state.settings, request.app.state.market_engine.ranking_context)
     opportunity = next((item for item in opportunities if item.canonical_symbol == canonical_symbol), None)
     if opportunity is None:
         raise HTTPException(status_code=404, detail="Opportunity not found in the current filtered set.")
+
+    funding_fraction: float | None = None
+    if strategy == "capture":
+        captured = capture_opportunity(opportunity, snapshots, request.app.state.settings, request.app.state.market_engine.ranking_context)
+        if captured is None or captured.capture is None:
+            raise HTTPException(status_code=404, detail="No next-settlement setup for this coin right now.")
+        opportunity = captured
+        # Reversing swaps the legs, which negates every settlement payment.
+        funding_fraction = (captured.capture.capture_percent / 100) * (-1 if reverse else 1)
+        holding_periods = 1
 
     execution_target = reverse_opportunity(opportunity) if reverse else opportunity
     parsed_leverage_overrides: dict[str, float] | None = None
@@ -339,6 +388,7 @@ async def execution_plan(
         holding_periods=holding_periods,
         basis_risk_buffer_percent=basis_risk_buffer_percent,
         scenario="reverse" if reverse else "best",
+        funding_fraction_override=funding_fraction,
     )
 
 
@@ -353,6 +403,46 @@ async def verify_trade_credentials(
     payload: TradeCredentialVerificationRequest,
 ) -> TradeCredentialVerificationResponse:
     return await request.app.state.trade_manager.verify_credentials(payload)
+
+
+class BacktestRequest(BaseModel):
+    days: int = Field(30, ge=1, le=90)
+    notional_usd: float = Field(1000, gt=0, le=1_000_000)
+    binance_taker_bps: float = Field(5, ge=0, le=20)
+    delta_taker_bps: float = Field(5, ge=0, le=20)
+    slippage_percent_per_leg: float = Field(0.1, ge=0, le=2)
+    min_net_percent: float = Field(0, ge=-1, le=5)
+
+
+@router.get("/backtest")
+async def backtest_state(request: Request) -> dict:
+    return request.app.state.backtest.state()
+
+
+@router.post("/backtest/run")
+async def backtest_run(request: Request, payload: BacktestRequest) -> dict:
+    """Downloads settled funding history (cached) and replays next-settlement captures."""
+    snapshots = await request.app.state.market_store.get_snapshots()
+    started = request.app.state.backtest.start(BacktestParams(**payload.model_dump()), snapshots)
+    if not started:
+        raise HTTPException(status_code=409, detail="A backtest is already running.")
+    return request.app.state.backtest.state()
+
+
+@router.post("/backtest/resimulate")
+async def backtest_resimulate(request: Request, payload: BacktestRequest) -> dict:
+    """Instant re-run with different fees or thresholds on the history already downloaded."""
+    result = request.app.state.backtest.resimulate(BacktestParams(**payload.model_dump()))
+    if result is None:
+        raise HTTPException(status_code=409, detail="Run a backtest first to download the history.")
+    return {"params": payload.model_dump(), "result": result}
+
+
+@router.get("/trade/journal", response_model=list[TradeSessionResponse])
+async def trade_journal(request: Request, mode: str | None = None, limit: int = 500) -> list[TradeSessionResponse]:
+    """Every paper and live trade, newest first, with predicted vs actual funding, fees and slippage."""
+    resolved_mode = mode if mode in {"paper", "live"} else None
+    return await request.app.state.trade_manager.list_journal(limit=max(1, min(limit, 2000)), mode=resolved_mode)
 
 
 @router.get("/trade/sessions/{session_id}", response_model=TradeSessionResponse)

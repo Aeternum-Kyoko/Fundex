@@ -1,0 +1,35 @@
+# One-server deployment: backend + website behind Caddy with automatic HTTPS.
+# Run from the repo root:  docker compose -f deploy/docker-compose.yml up -d --build
+services:
+  backend:
+    build: ../backend
+    env_file: ../backend/.env
+    environment:
+      DATABASE_PATH: /app/data/arbradar.db
+      CORS_ORIGINS: '["https://${SITE_ADDRESS}"]'
+    volumes:
+      - fundex-data:/app/data
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ../frontend
+      args:
+        VITE_AUTH_USERNAME: ${VITE_AUTH_USERNAME:-}
+        VITE_AUTH_PASSWORD: ${VITE_AUTH_PASSWORD:-}
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  fundex-data:
+  caddy-data:
+  caddy-config:

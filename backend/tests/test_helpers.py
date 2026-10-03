@@ -24,6 +24,8 @@ def make_snapshot(
     fetched_at: datetime | None = None,
     next_funding_time: datetime | None = None,
     quote_asset: str = "USDT",
+    funding_interval_hours: int = 8,
+    taker_fee_bps: float = 5,
 ) -> FundingSnapshot:
     base_asset = canonical_symbol.split("-")[0]
     symbol = exchange_symbol or (f"{base_asset}USDT" if exchange == "binance" else f"{base_asset}USD")
@@ -34,13 +36,13 @@ def make_snapshot(
         base_asset=base_asset,
         quote_asset=quote_asset,
         funding_rate=funding_rate,
-        funding_interval_hours=8,
+        funding_interval_hours=funding_interval_hours,
         mark_price=mark_price,
         index_price=mark_price,
         open_interest_usd=open_interest_usd,
         next_funding_time=next_funding_time or datetime.now(timezone.utc) + timedelta(hours=1),
         maker_fee_bps=2,
-        taker_fee_bps=5,
+        taker_fee_bps=taker_fee_bps,
         fetched_at=fetched_at or datetime.now(timezone.utc),
     )
 
@@ -103,11 +105,16 @@ def make_opportunity(
         long_leg=long_leg,
         short_leg=short_leg,
         spread_rate=spread,
+        spread_rate_hourly=spread / 8,
         funding_interval_hours=8,
         gross_apr_percent=spread * 3 * 365 * 100,
         net_apr_percent=15.0,
         estimated_round_trip_fee_percent=0.2,
         estimated_slippage_percent=0.05,
+        estimated_total_cost_percent=0.3,
+        holding_horizon_hours=168,
+        expected_funding_percent=spread * 100 * 21,
+        net_return_percent=spread * 100 * 21 - 0.3,
         combined_open_interest_usd=combined_open_interest_usd,
         price_dislocation_percent=0.1,
         max_leg_age_seconds=max_leg_age_seconds,

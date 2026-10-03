@@ -19,8 +19,12 @@ class CoinSwitchAdapter(ExchangeAdapter):
     _base_url = "https://coinswitch.co"
     _metadata_ttl = timedelta(hours=6)
 
-    def __init__(self, client, settings=None) -> None:
+    def __init__(self, client, settings=None, *, api_key: str | None = None, secret_key: str | None = None, exchange_code: str | None = None) -> None:
         super().__init__(client, settings)
+        # Keys saved through the admin page take precedence over .env values.
+        self._api_key = api_key or (settings.coinswitch_api_key if settings else None)
+        self._secret_key = secret_key or (settings.coinswitch_secret_key if settings else None)
+        self._exchange_code = exchange_code or (settings.coinswitch_exchange if settings else "EXCHANGE_2")
         self._instrument_metadata: dict[str, dict[str, float | str | None]] = {}
         self._instrument_metadata_updated_at: datetime | None = None
 
@@ -43,7 +47,7 @@ class CoinSwitchAdapter(ExchangeAdapter):
         if self._instrument_metadata_updated_at and now - self._instrument_metadata_updated_at < self._metadata_ttl:
             return
 
-        params = {"exchange": self.settings.coinswitch_exchange}
+        params = {"exchange": self._exchange_code}
         endpoint = "/trade/api/v2/futures/instrument_info"
         signature, request_path = self._sign_request("GET", endpoint, params, str(epoch_time))
 
@@ -52,9 +56,9 @@ class CoinSwitchAdapter(ExchangeAdapter):
             headers={
                 "Content-Type": "application/json",
                 "X-AUTH-SIGNATURE": signature,
-                "X-AUTH-APIKEY": self.settings.coinswitch_api_key or "",
+                "X-AUTH-APIKEY": self._api_key or "",
                 "X-AUTH-EPOCH": str(epoch_time),
-                "User-Agent": "ArbRadar/1.0",
+                "User-Agent": "Fundex/1.0",
             },
             timeout=30.0,
         )
@@ -83,7 +87,7 @@ class CoinSwitchAdapter(ExchangeAdapter):
     async def fetch_snapshots(self) -> list[FundingSnapshot]:
         epoch_time = await self._get_server_epoch()
         await self._refresh_instrument_metadata_if_needed(epoch_time)
-        params = {"exchange": self.settings.coinswitch_exchange}
+        params = {"exchange": self._exchange_code}
         endpoint = "/trade/api/v2/futures/all-pairs/ticker"
         signature, request_path = self._sign_request("GET", endpoint, params, str(epoch_time))
 
@@ -92,9 +96,9 @@ class CoinSwitchAdapter(ExchangeAdapter):
             headers={
                 "Content-Type": "application/json",
                 "X-AUTH-SIGNATURE": signature,
-                "X-AUTH-APIKEY": self.settings.coinswitch_api_key or "",
+                "X-AUTH-APIKEY": self._api_key or "",
                 "X-AUTH-EPOCH": str(epoch_time),
-                "User-Agent": "ArbRadar/1.0",
+                "User-Agent": "Fundex/1.0",
             },
             timeout=30.0,
         )
@@ -151,7 +155,7 @@ class CoinSwitchAdapter(ExchangeAdapter):
         return int(payload.get("serverTime") or int(time.time() * 1000))
 
     def _sign_request(self, method: str, endpoint: str, params: dict[str, str], epoch_time: str) -> tuple[str, str]:
-        if not self.settings or not self.settings.coinswitch_secret_key:
+        if not self._secret_key:
             raise RuntimeError("CoinSwitch secret key is missing.")
 
         request_path = endpoint
@@ -159,7 +163,7 @@ class CoinSwitchAdapter(ExchangeAdapter):
             request_path += "?" + urlencode(params)
 
         request_string = f"{method}{request_path}{epoch_time}".encode("utf-8")
-        secret_key_bytes = bytes.fromhex(self.settings.coinswitch_secret_key)
+        secret_key_bytes = bytes.fromhex(self._secret_key)
         private_key = ed25519.Ed25519PrivateKey.from_private_bytes(secret_key_bytes)
         signature = private_key.sign(request_string).hex()
         return signature, request_path

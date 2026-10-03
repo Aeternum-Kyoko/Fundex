@@ -19,6 +19,7 @@ from fastapi import HTTPException
 from app.models.execution import ExecutionLegPlan, ExecutionPlanResponse
 from app.models.market import ArbitrageOpportunity, ExchangeName, FundingSnapshot
 from app.models.trade import (
+    FundingLegResult,
     TradeCreateRequest,
     TradeCredentialInput,
     TradeCredentialVerificationRequest,
@@ -32,19 +33,26 @@ from app.models.trade import (
 )
 from app.services.arbitrage import build_opportunities
 from app.services.execution import build_execution_plan, reverse_opportunity
+from app.services.liquidity import enabled_exchange_names
+from app.services.liquidity import OrderBookFetcher, impact_percent
 from app.services.opportunity_ranker import (
-    build_opportunity_leg,
-    combined_open_interest_usd,
-    estimate_max_leg_age_seconds,
-    estimate_price_dislocation_percent,
+    build_opportunity,
+    capture_opportunity,
+    funding_events,
     is_snapshot_usable,
-    score_opportunity_pair,
     select_rankable_pair,
 )
+from app.services.settled_funding import SettledFundingResolver
+from app.services.trade_journal import FINAL_STATUSES, TradeJournal
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+WALL_CLOCK_STEP_SECONDS = 5.0
+# Entering later than this after the planned entry moment is refused: the funding window is likely gone.
+MAX_ENTRY_LATENESS_SECONDS = 20.0
 
 
 def _compact_json(payload: dict[str, Any]) -> str:
@@ -69,6 +77,8 @@ def _support_for_exchange(exchange: ExchangeName) -> tuple[bool, str | None]:
         return True, "CoinSwitch standard futures API supports live market orders, but leverage must already be configured on the venue."
     if exchange == "delta":
         return True, "Delta Exchange India live mode is enabled with market orders. Contract size is normalized to the nearest supported integer quantity."
+    if exchange == "wazirx":
+        return False, "WazirX is monitor-only for now; live order routing is not wired up."
     return False, "Live support is unavailable for this exchange in the current phase."
 
 
@@ -92,14 +102,55 @@ class _TradeSessionRecord:
 
 
 class TradeManager:
-    def __init__(self, settings, market_store) -> None:
+    def __init__(self, settings, market_store, ranking_context=None) -> None:
         self.settings = settings
         self.market_store = market_store
-        self.client = httpx.AsyncClient(timeout=30.0, headers={"User-Agent": "ArbRadar/1.0"})
+        self.ranking_context = ranking_context
+        self.client = httpx.AsyncClient(timeout=30.0, headers={"User-Agent": "Fundex/1.0"})
         self._sessions: dict[str, _TradeSessionRecord] = {}
         self._lock = asyncio.Lock()
         self._delta_products_by_symbol: dict[str, int] = {}
         self._delta_products_updated_at: datetime | None = None
+        self.journal = TradeJournal(settings.database_file)
+        self._books = OrderBookFetcher(self.client)
+        self._funding_resolver = SettledFundingResolver(self.client, market_store)
+        self._background: set[asyncio.Task[None]] = set()
+        # Set by the app: sends trade results to Telegram (optional).
+        self.notifier = None
+
+    async def start(self) -> None:
+        # A restart kills in-flight sessions; record that honestly instead of leaving them "running".
+        for session in await self.journal.interrupted():
+            session.status = "failed"
+            session.current_phase = "Interrupted by a server restart"
+            session.updated_at = _utcnow()
+            message = "The server restarted during this trade."
+            if session.mode == "live":
+                message += " Check both exchanges for open positions and close them manually."
+            session.events.append(TradeEvent(at=session.updated_at, phase="failed", message=message, level="error"))
+            session.warnings.append(message)
+            await self.journal.save(session)
+
+    async def list_journal(self, limit: int = 500, mode: str | None = None) -> list[TradeSessionResponse]:
+        return await self.journal.list(limit=limit, mode=mode)
+
+    async def _persist(self, session_id: str) -> None:
+        async with self._lock:
+            record = self._sessions.get(session_id)
+        if record is not None:
+            with contextlib.suppress(Exception):
+                await self.journal.save(record.response)
+
+    async def _notify(self, session_id: str, kind: str) -> None:
+        if self.notifier is None:
+            return
+        with contextlib.suppress(Exception):
+            await self.notifier.notify_trade(await self.get_session(session_id), kind)
+
+    def _spawn(self, coroutine) -> None:
+        task = asyncio.create_task(coroutine)
+        self._background.add(task)
+        task.add_done_callback(self._background.discard)
 
     async def stop(self) -> None:
         async with self._lock:
@@ -109,16 +160,18 @@ class TradeManager:
                 record.task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await record.task
+        for task in list(self._background):
+            task.cancel()
         await self.client.aclose()
 
     async def create_session(self, request: TradeCreateRequest) -> TradeSessionResponse:
-        selected_exchanges = request.selected_exchanges or self.settings.enabled_exchange_names
+        selected_exchanges = request.selected_exchanges or enabled_exchange_names(self.settings, self.ranking_context)
         snapshots = [
             snapshot
             for snapshot in await self.market_store.get_snapshots()
             if snapshot.exchange in selected_exchanges
         ]
-        opportunities = build_opportunities(snapshots, self.settings)
+        opportunities = build_opportunities(snapshots, self.settings, self.ranking_context)
         base_opportunity = next(
             (item for item in opportunities if item.canonical_symbol.upper() == request.canonical_symbol.upper()),
             None,
@@ -129,44 +182,19 @@ class TradeManager:
                 for snapshot in snapshots
                 if snapshot.canonical_symbol.upper() == request.canonical_symbol.upper() and is_snapshot_usable(snapshot)
             ]
-            pair = select_rankable_pair(symbol_snapshots)
+            pair = select_rankable_pair(symbol_snapshots, self.settings)
             if pair is not None:
-                long_snapshot, short_snapshot = pair
-                spread_rate = short_snapshot.funding_rate - long_snapshot.funding_rate
-                interval_hours = min(long_snapshot.funding_interval_hours, short_snapshot.funding_interval_hours)
-                periods_per_year = (24 / interval_hours) * 365
-                price_dislocation_percent = estimate_price_dislocation_percent(long_snapshot, short_snapshot)
-                confidence_score, warnings, estimated_slippage_percent = score_opportunity_pair(
-                    long_snapshot,
-                    short_snapshot,
-                    self.settings,
-                    price_dislocation_percent,
-                )
-                round_trip_fee_percent = ((long_snapshot.taker_fee_bps + short_snapshot.taker_fee_bps) * 2) / 100
-                base_opportunity = ArbitrageOpportunity(
-                    canonical_symbol=long_snapshot.canonical_symbol,
-                    base_asset=long_snapshot.base_asset,
-                    quote_asset=long_snapshot.quote_asset,
-                    long_leg=build_opportunity_leg(long_snapshot),
-                    short_leg=build_opportunity_leg(short_snapshot),
-                    spread_rate=spread_rate,
-                    funding_interval_hours=interval_hours,
-                    gross_apr_percent=spread_rate * periods_per_year * 100,
-                    net_apr_percent=(
-                        spread_rate - (round_trip_fee_percent / 100) - (estimated_slippage_percent / 100)
-                    )
-                    * periods_per_year
-                    * 100,
-                    estimated_round_trip_fee_percent=round_trip_fee_percent,
-                    estimated_slippage_percent=estimated_slippage_percent,
-                    combined_open_interest_usd=combined_open_interest_usd(long_snapshot, short_snapshot),
-                    price_dislocation_percent=price_dislocation_percent,
-                    max_leg_age_seconds=estimate_max_leg_age_seconds(long_snapshot, short_snapshot),
-                    confidence_score=confidence_score,
-                    warnings=warnings,
-                )
+                base_opportunity = build_opportunity(pair[0], pair[1], self.settings, context=self.ranking_context)
         if base_opportunity is None:
             raise HTTPException(status_code=404, detail="Trade setup not found in the current live exchange scope.")
+
+        settles_at_override: datetime | None = None
+        if request.strategy == "capture":
+            captured = capture_opportunity(base_opportunity, snapshots, self.settings, self.ranking_context)
+            if captured is None or captured.capture is None:
+                raise HTTPException(status_code=404, detail="No next-settlement setup for this coin right now.")
+            base_opportunity = captured
+            settles_at_override = captured.capture.settles_at
 
         execution_target = reverse_opportunity(base_opportunity) if request.scenario == "reverse" else base_opportunity
         plan = build_execution_plan(
@@ -183,7 +211,7 @@ class TradeManager:
         long_snapshot = self._resolve_snapshot(snapshots, execution_target.canonical_symbol, execution_target.long_leg.exchange)
         short_snapshot = self._resolve_snapshot(snapshots, execution_target.canonical_symbol, execution_target.short_leg.exchange)
 
-        pair_funding_time = self._pair_funding_time(execution_target)
+        pair_funding_time = settles_at_override or self._pair_funding_time(execution_target)
         if pair_funding_time is None:
             raise HTTPException(status_code=400, detail="Live funding timing is missing for this setup, so the trade cannot be armed.")
 
@@ -196,6 +224,26 @@ class TradeManager:
             entry_at = now + timedelta(seconds=2)
             cancellable_until = min(cancellable_until, now)
             warnings.append("The setup was armed too close to funding, so entry will begin almost immediately.")
+
+        # Only settlements that land between entry and exit are collected. With legs on different
+        # schedules that can be one leg's payment only, which may even be a cost.
+        window_hours = max((exit_at - entry_at).total_seconds() / 3600, 0.0)
+        window_events = funding_events(execution_target.long_leg, execution_target.short_leg, window_hours, now=entry_at) or []
+        settling_legs = set(self._settling_leg_names(execution_target, entry_at, exit_at))
+        window_funding_pnl_usd = sum(amount for _, amount in window_events) * plan.notional_usd
+        window_net_pnl_usd = plan.expected_net_pnl_usd - plan.estimated_funding_pnl_usd + window_funding_pnl_usd
+        window_return_percent = (
+            (window_net_pnl_usd / plan.capital_required_usd) * 100 if plan.capital_required_usd > 0 else 0.0
+        )
+        if settling_legs != {"long", "short"}:
+            collected = (
+                execution_target.long_leg.display_name if "long" in settling_legs else execution_target.short_leg.display_name
+            ) if settling_legs else "neither leg"
+            warnings.append(
+                f"Only {collected} settles inside the trade window, so the other leg's funding is not collected."
+            )
+        if window_net_pnl_usd <= 0:
+            warnings.append("This trade window is not net profitable after fees, slippage, and basis reserve.")
 
         long_live_supported, long_support_note = _support_for_exchange(execution_target.long_leg.exchange)
         short_live_supported, short_support_note = _support_for_exchange(execution_target.short_leg.exchange)
@@ -232,10 +280,10 @@ class TradeManager:
             capital_input_usd=request.capital_usd,
             leverage=request.leverage,
             holding_periods=request.holding_periods,
-            expected_net_pnl_usd=plan.expected_net_pnl_usd,
-            expected_funding_pnl_usd=plan.estimated_funding_pnl_usd,
+            expected_net_pnl_usd=window_net_pnl_usd,
+            expected_funding_pnl_usd=window_funding_pnl_usd,
             estimated_total_fees_usd=plan.estimated_total_fees_usd,
-            expected_net_return_on_capital_percent=plan.expected_net_return_on_capital_percent,
+            expected_net_return_on_capital_percent=window_return_percent,
             realized_price_pnl_usd=None,
             realized_funding_pnl_usd=None,
             realized_total_fees_usd=None,
@@ -245,11 +293,28 @@ class TradeManager:
                 TradeEvent(
                     at=now,
                     phase="armed",
-                    message=f"{request.mode.title()} trade armed for {execution_target.canonical_symbol}. Entry targets {entry_at.isoformat()} and exit targets {exit_at.isoformat()}.",
+                    message=(
+                        f"{request.mode.title()} trade armed for {execution_target.canonical_symbol}: enter at "
+                        f"{entry_at.strftime('%H:%M:%S')} UTC, settlement {pair_funding_time.strftime('%H:%M:%S')} UTC, "
+                        f"exit at {exit_at.strftime('%H:%M:%S')} UTC."
+                    ),
                 )
             ],
             long_leg=self._build_trade_leg(plan.long_leg, execution_target.long_leg.max_leverage, long_live_supported, long_support_note),
             short_leg=self._build_trade_leg(plan.short_leg, execution_target.short_leg.max_leverage, short_live_supported, short_support_note),
+            strategy=request.strategy,
+            expected_slippage_usd=plan.estimated_total_slippage_usd,
+            funding_legs=[
+                FundingLegResult(
+                    exchange=leg.exchange,
+                    side=name,  # type: ignore[arg-type]
+                    settles_at=leg.next_funding_time or pair_funding_time,
+                    predicted_rate=leg.funding_rate,
+                )
+                for name, leg in (("long", execution_target.long_leg), ("short", execution_target.short_leg))
+                if name in settling_legs
+            ],
+            funding_status="pending" if settling_legs else "not_applicable",
         )
         record = _TradeSessionRecord(
             response=response,
@@ -264,6 +329,7 @@ class TradeManager:
         async with self._lock:
             self._sessions[session_id] = record
             record.task = asyncio.create_task(self._run_session(session_id), name=f"trade-session-{session_id}")
+        await self.journal.save(response)
 
         return response
 
@@ -336,9 +402,12 @@ class TradeManager:
     async def get_session(self, session_id: str) -> TradeSessionResponse:
         async with self._lock:
             record = self._sessions.get(session_id)
-            if record is None:
-                raise HTTPException(status_code=404, detail="Trade session not found.")
+        if record is not None:
             return record.response
+        stored = await self.journal.get(session_id)
+        if stored is None:
+            raise HTTPException(status_code=404, detail="Trade session not found.")
+        return stored
 
     async def cancel_session(self, session_id: str) -> TradeSessionResponse:
         async with self._lock:
@@ -360,6 +429,7 @@ class TradeManager:
             task = record.task
         if task and not task.done():
             task.cancel()
+        await self._persist(session_id)
         return await self.get_session(session_id)
 
     async def _run_session(self, session_id: str) -> None:
@@ -368,6 +438,13 @@ class TradeManager:
             await self._sleep_until(record.response.scheduled_entry_at)
             record = await self._get_record(session_id)
             if record.response.status == "cancelled":
+                return
+            late = (_utcnow() - record.response.scheduled_entry_at).total_seconds() if record.response.scheduled_entry_at else 0.0
+            if late > MAX_ENTRY_LATENESS_SECONDS:
+                await self._mark_failed(
+                    session_id,
+                    f"Missed the entry window by {late / 60:.1f} minutes (the computer was asleep or the server was busy). No orders were sent.",
+                )
                 return
 
             await self._update_phase(session_id, status="entering", phase="Submitting entry orders", message="Entry window opened.")
@@ -381,6 +458,10 @@ class TradeManager:
             record = await self._get_record(session_id)
             if record.response.status == "cancelled":
                 return
+            exit_late = (_utcnow() - record.response.scheduled_exit_at).total_seconds() if record.response.scheduled_exit_at else 0.0
+            if exit_late > MAX_ENTRY_LATENESS_SECONDS:
+                # Positions are open, so exit anyway; just say why the timing is off.
+                await self._append_event(session_id, "exit", f"Exit is {exit_late:.0f}s late; closing now.", level="warning")
 
             await self._update_phase(session_id, status="exiting", phase="Submitting exit orders", message="Exit window opened.")
             if record.request.mode == "paper":
@@ -388,7 +469,12 @@ class TradeManager:
             else:
                 await self._execute_live_exit(session_id)
 
+            await self._finalize_results(session_id)
             await self._update_phase(session_id, status="completed", phase="Trade finished", message="Trade session completed.")
+            record = await self._get_record(session_id)
+            await self._notify(session_id, "completed")
+            if record.response.funding_legs:
+                self._spawn(self._resolve_settled_funding(session_id))
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001
@@ -396,136 +482,220 @@ class TradeManager:
         finally:
             async with self._lock:
                 record = self._sessions.get(session_id)
-                if record and record.response.status in {"completed", "failed", "cancelled"}:
+                if record and record.response.status in FINAL_STATUSES:
                     record.credentials = {}
+            await self._persist(session_id)
+
+    async def _book_fill(self, leg: ExecutionLegPlan, action: str) -> tuple[float, float | None, str]:
+        """Fill price for `action` ("buy"/"sell") of this leg's notional on the live book right now.
+
+        Returns (fill price, book mid, note). Falls back to the latest mark when the book can't be read;
+        raises when the visible book is too thin for the size, because a real order would not fill cleanly.
+        """
+        note = "no public order book for this venue; used latest mark"
+        try:
+            book = await self._books.fetch(leg.exchange, leg.exchange_symbol)  # type: ignore[arg-type]
+        except Exception as exc:  # noqa: BLE001
+            book = None
+            note = f"book unavailable ({exc.__class__.__name__}); used latest mark"
+        if book:
+            bids = sorted(((p, q) for p, q in book[0] if p > 0 and q > 0), key=lambda level: -level[0])
+            asks = sorted(((p, q) for p, q in book[1] if p > 0 and q > 0), key=lambda level: level[0])
+            if bids and asks:
+                mid = (bids[0][0] + asks[0][0]) / 2
+                impact = impact_percent(asks if action == "buy" else bids, leg.notional_usd, mid)
+                if impact is None:
+                    raise RuntimeError(f"{leg.display_name} order book is too thin to fill ${leg.notional_usd:,.0f} right now.")
+                price = mid * (1 + impact / 100) if action == "buy" else mid * (1 - impact / 100)
+                return price, mid, f"filled on the live book ({impact:.3f}% from mid)"
+            note = "book was empty; used latest mark"
+        snapshots = await self.market_store.get_snapshots({leg.exchange})  # type: ignore[arg-type]
+        mark = next((item.mark_price for item in snapshots if item.exchange_symbol == leg.exchange_symbol and item.mark_price), None)
+        return (mark or leg.reference_price), None, note
+
+    async def _simulate_fill(self, session_id: str, leg_name: str, *, exit_order: bool) -> None:
+        record = await self._get_record(session_id)
+        plan_leg = record.plan.long_leg if leg_name == "long" else record.plan.short_leg
+        target = record.response.long_leg if leg_name == "long" else record.response.short_leg
+        # Long buys to enter and sells to exit; short does the opposite.
+        action = ("sell" if plan_leg.side == "buy" else "buy") if exit_order else plan_leg.side
+        price, mid, note = await self._book_fill(plan_leg, action)
+        stage = "exit" if exit_order else "entry"
+        raw = {"mode": "paper", "simulated": True, "action": action, "fill_price": price, "mid_price": mid, "note": note, "at": _utcnow().isoformat()}
+        if exit_order:
+            target.status = "closed"
+            target.exit_order_id = f"paper-{stage}-{record.response.id}-{leg_name}"
+            target.exit_fill_price = price
+            target.exit_mid_price = mid
+            target.raw_exit_response = raw
+        else:
+            target.status = "filled"
+            target.entry_order_id = f"paper-{stage}-{record.response.id}-{leg_name}"
+            target.entry_fill_price = price
+            target.entry_mid_price = mid
+            target.raw_entry_response = raw
+        await self._append_event(session_id, stage, f"Paper {leg_name} {action} at {_format_decimal(price)}: {note}.")
 
     async def _simulate_entry(self, session_id: str) -> None:
-        record = await self._get_record(session_id)
-        now = _utcnow()
-        record.response.long_leg.status = "submitted"
-        record.response.long_leg.entry_order_id = f"paper-entry-{record.response.id}-long"
-        record.response.long_leg.raw_entry_response = {
-            "mode": "paper",
-            "submitted_at": now.isoformat(),
-            "simulated": True,
-        }
-        record.response.short_leg.status = "submitted"
-        record.response.short_leg.entry_order_id = f"paper-entry-{record.response.id}-short"
-        record.response.short_leg.raw_entry_response = {
-            "mode": "paper",
-            "submitted_at": now.isoformat(),
-            "simulated": True,
-        }
-        await self._append_event(session_id, "entry", "Paper entry orders were submitted with demo credentials.")
-        await asyncio.sleep(1)
-
-        long_entry = self._paper_fill_price(record.response.id, record.plan.long_leg, stage="entry")
-        short_entry = self._paper_fill_price(record.response.id, record.plan.short_leg, stage="entry")
-        record.response.long_leg.status = "filled"
-        record.response.long_leg.entry_fill_price = long_entry
-        record.response.long_leg.raw_entry_response = {
-            "mode": "paper",
-            "filled_at": _utcnow().isoformat(),
-            "simulated": True,
-            "reference_price": record.plan.long_leg.reference_price,
-            "fill_price": long_entry,
-        }
-        record.response.short_leg.status = "filled"
-        record.response.short_leg.entry_fill_price = short_entry
-        record.response.short_leg.raw_entry_response = {
-            "mode": "paper",
-            "filled_at": _utcnow().isoformat(),
-            "simulated": True,
-            "reference_price": record.plan.short_leg.reference_price,
-            "fill_price": short_entry,
-        }
-        await self._append_event(session_id, "entry", "Paper entry filled with simulated slippage around the live reference prices.")
+        await asyncio.gather(
+            self._simulate_fill(session_id, "long", exit_order=False),
+            self._simulate_fill(session_id, "short", exit_order=False),
+        )
 
     async def _simulate_exit(self, session_id: str) -> None:
-        record = await self._get_record(session_id)
-        now = _utcnow()
-        record.response.long_leg.status = "submitted"
-        record.response.long_leg.exit_order_id = f"paper-exit-{record.response.id}-long"
-        record.response.long_leg.raw_exit_response = {"mode": "paper", "submitted_at": now.isoformat(), "simulated": True}
-        record.response.short_leg.status = "submitted"
-        record.response.short_leg.exit_order_id = f"paper-exit-{record.response.id}-short"
-        record.response.short_leg.raw_exit_response = {"mode": "paper", "submitted_at": now.isoformat(), "simulated": True}
-        await self._append_event(session_id, "exit", "Paper exit orders were submitted after the funding window.")
-        await asyncio.sleep(1)
-
-        long_exit = self._paper_fill_price(record.response.id, record.plan.long_leg, stage="exit")
-        short_exit = self._paper_fill_price(record.response.id, record.plan.short_leg, stage="exit")
-        record.response.long_leg.status = "closed"
-        record.response.long_leg.exit_fill_price = long_exit
-        record.response.long_leg.raw_exit_response = {
-            "mode": "paper",
-            "closed_at": _utcnow().isoformat(),
-            "simulated": True,
-            "reference_price": record.plan.long_leg.reference_price,
-            "fill_price": long_exit,
-        }
-        record.response.short_leg.status = "closed"
-        record.response.short_leg.exit_fill_price = short_exit
-        record.response.short_leg.raw_exit_response = {
-            "mode": "paper",
-            "closed_at": _utcnow().isoformat(),
-            "simulated": True,
-            "reference_price": record.plan.short_leg.reference_price,
-            "fill_price": short_exit,
-        }
-        self._apply_realized_paper_results(record)
-        await self._append_event(
-            session_id,
-            "exit",
-            f"Paper exit filled. Simulated net result: {record.response.realized_net_pnl_usd:.2f} USD.",
+        await asyncio.gather(
+            self._simulate_fill(session_id, "long", exit_order=True),
+            self._simulate_fill(session_id, "short", exit_order=True),
         )
+
+    async def _book_mid(self, leg: ExecutionLegPlan) -> float | None:
+        with contextlib.suppress(Exception):
+            book = await self._books.fetch(leg.exchange, leg.exchange_symbol)  # type: ignore[arg-type]
+            if book and book[0] and book[1]:
+                return (max(p for p, _ in book[0]) + min(p for p, _ in book[1])) / 2
+        return None
+
+    async def _live_leg(self, record: _TradeSessionRecord, leg_name: str, *, is_exit: bool) -> dict[str, Any]:
+        snapshot = record.long_snapshot if leg_name == "long" else record.short_snapshot
+        plan_leg = record.plan.long_leg if leg_name == "long" else record.plan.short_leg
+        # Read the mid alongside the order so realised slippage can be measured.
+        response, mid = await asyncio.gather(
+            self._submit_live_order(
+                snapshot=snapshot,
+                credential=record.credentials[snapshot.exchange],
+                leg=plan_leg,
+                leverage=plan_leg.leverage,
+                is_exit=is_exit,
+            ),
+            self._book_mid(plan_leg),
+        )
+        target = record.response.long_leg if leg_name == "long" else record.response.short_leg
+        if is_exit:
+            target.exit_mid_price = mid
+        else:
+            target.entry_mid_price = mid
+        return response
 
     async def _execute_live_entry(self, session_id: str) -> None:
         record = await self._get_record(session_id)
-
-        try:
-            long_response = await self._submit_live_order(
-                snapshot=record.long_snapshot,
-                credential=record.credentials[record.long_snapshot.exchange],
-                leg=record.plan.long_leg,
-                leverage=record.plan.long_leg.leverage,
-                is_exit=False,
-            )
-            await self._apply_order_response(session_id, "long", long_response, status="filled")
-
-            short_response = await self._submit_live_order(
-                snapshot=record.short_snapshot,
-                credential=record.credentials[record.short_snapshot.exchange],
-                leg=record.plan.short_leg,
-                leverage=record.plan.short_leg.leverage,
-                is_exit=False,
-            )
-            await self._apply_order_response(session_id, "short", short_response, status="filled")
-            await self._append_event(session_id, "entry", "Live entry orders were accepted on both exchanges.")
-        except Exception:
-            await self._attempt_emergency_close(record, "long")
-            raise
+        # Both legs go out together so the position is never one-sided for longer than the slower venue.
+        results = await asyncio.gather(
+            self._live_leg(record, "long", is_exit=False),
+            self._live_leg(record, "short", is_exit=False),
+            return_exceptions=True,
+        )
+        failures = []
+        for leg_name, result in zip(("long", "short"), results):
+            if isinstance(result, Exception):
+                failures.append(f"{leg_name}: {result}")
+            else:
+                await self._apply_order_response(session_id, leg_name, result, status="filled")
+        if failures:
+            for leg_name, result in zip(("long", "short"), results):
+                if not isinstance(result, Exception):
+                    await self._attempt_emergency_close(record, leg_name)
+            raise RuntimeError("Entry failed (" + "; ".join(failures) + "). Any filled leg was sent an emergency close.")
+        await self._append_event(session_id, "entry", "Live entry orders were accepted on both exchanges.")
 
     async def _execute_live_exit(self, session_id: str) -> None:
         record = await self._get_record(session_id)
-        long_response = await self._submit_live_order(
-            snapshot=record.long_snapshot,
-            credential=record.credentials[record.long_snapshot.exchange],
-            leg=record.plan.long_leg,
-            leverage=record.plan.long_leg.leverage,
-            is_exit=True,
-        )
-        await self._apply_order_response(session_id, "long", long_response, status="closed", exit_order=True)
 
-        short_response = await self._submit_live_order(
-            snapshot=record.short_snapshot,
-            credential=record.credentials[record.short_snapshot.exchange],
-            leg=record.plan.short_leg,
-            leverage=record.plan.short_leg.leverage,
-            is_exit=True,
-        )
-        await self._apply_order_response(session_id, "short", short_response, status="closed", exit_order=True)
+        async def close_with_retry(leg_name: str) -> dict[str, Any]:
+            last_error: Exception | None = None
+            for attempt in range(3):
+                try:
+                    return await self._live_leg(record, leg_name, is_exit=True)
+                except Exception as exc:  # noqa: BLE001
+                    last_error = exc
+                    await self._append_event(session_id, "exit", f"{leg_name} close attempt {attempt + 1} failed: {exc}", level="warning")
+                    await asyncio.sleep(2)
+            raise RuntimeError(str(last_error))
+
+        results = await asyncio.gather(close_with_retry("long"), close_with_retry("short"), return_exceptions=True)
+        still_open = []
+        for leg_name, result in zip(("long", "short"), results):
+            if isinstance(result, Exception):
+                still_open.append(leg_name)
+            else:
+                await self._apply_order_response(session_id, leg_name, result, status="closed", exit_order=True)
+        if still_open:
+            raise RuntimeError(
+                f"Could not close the {' and '.join(still_open)} leg after 3 attempts. That position is STILL OPEN; close it on the exchange now."
+            )
         await self._append_event(session_id, "exit", "Live exit orders were accepted on both exchanges.")
+
+    async def _finalize_results(self, session_id: str) -> None:
+        """Price PnL, fees and slippage from the actual fills. Funding starts as the prediction and is
+        replaced by the settled rate once the exchanges publish it."""
+        record = await self._get_record(session_id)
+        response = record.response
+        fees = 0.0
+        slippage = 0.0
+        slippage_known = False
+        for leg, plan_leg in ((response.long_leg, record.plan.long_leg), (response.short_leg, record.plan.short_leg)):
+            for fill, mid in ((leg.entry_fill_price, leg.entry_mid_price), (leg.exit_fill_price, leg.exit_mid_price)):
+                if fill is None:
+                    continue
+                fees += fill * leg.estimated_quantity * plan_leg.taker_fee_percent / 100
+                if mid:
+                    slippage += abs(fill - mid) * leg.estimated_quantity
+                    slippage_known = True
+        response.realized_price_pnl_usd = self._leg_price_pnl(response.long_leg) + self._leg_price_pnl(response.short_leg)
+        response.realized_total_fees_usd = fees
+        response.realized_slippage_usd = slippage if slippage_known else None
+        response.realized_funding_pnl_usd = response.expected_funding_pnl_usd if response.funding_legs else 0.0
+        response.realized_net_pnl_usd = response.realized_price_pnl_usd + response.realized_funding_pnl_usd - fees
+        funding_note = " (funding is the prediction until the settled rate is published)" if response.funding_legs else ""
+        await self._append_event(
+            session_id,
+            "result",
+            f"Price {response.realized_price_pnl_usd:+.2f} USD, fees {fees:.2f} USD, funding {response.realized_funding_pnl_usd:+.2f} USD{funding_note}.",
+        )
+
+    async def _resolve_settled_funding(self, session_id: str) -> None:
+        record = await self._get_record(session_id)
+        response = record.response
+        settles_at = max(leg.settles_at for leg in response.funding_legs)
+        await self._sleep_until(settles_at + timedelta(seconds=90))
+        for attempt in range(6):
+            pending = False
+            for funding_leg in response.funding_legs:
+                if funding_leg.source in {"exchange_history", "post_settlement_feed"}:
+                    continue
+                trade_leg = response.long_leg if funding_leg.side == "long" else response.short_leg
+                rate, source = await self._funding_resolver.resolve(
+                    funding_leg.exchange,
+                    trade_leg.exchange_symbol,
+                    response.canonical_symbol,
+                    funding_leg.settles_at,
+                    funding_leg.predicted_rate,
+                )
+                funding_leg.actual_rate = rate
+                funding_leg.source = source  # type: ignore[assignment]
+                position_value = (trade_leg.entry_fill_price or trade_leg.reference_price) * trade_leg.estimated_quantity
+                # Longs pay a positive rate, shorts receive it.
+                funding_leg.payment_usd = (-rate if funding_leg.side == "long" else rate) * position_value
+                if source == "estimate" and funding_leg.exchange in {"binance", "delta", "coindcx"}:
+                    pending = True
+            if not pending or attempt == 5:
+                break
+            await asyncio.sleep(60)
+
+        sources = {leg.source for leg in response.funding_legs}
+        response.funding_status = "settled" if sources <= {"exchange_history", "post_settlement_feed"} else "estimated" if sources == {"estimate"} else "partly_estimated"
+        response.realized_funding_pnl_usd = sum(leg.payment_usd or 0.0 for leg in response.funding_legs)
+        response.realized_net_pnl_usd = (response.realized_price_pnl_usd or 0.0) + response.realized_funding_pnl_usd - (response.realized_total_fees_usd or 0.0)
+        detail = ", ".join(
+            f"{leg.exchange} {leg.side} predicted {leg.predicted_rate * 100:+.4f}% settled {((leg.actual_rate or 0) * 100):+.4f}% ({leg.source.replace('_', ' ')})"
+            for leg in response.funding_legs
+        )
+        await self._append_event(
+            session_id,
+            "funding",
+            f"Funding resolved: {detail}. Net result {response.realized_net_pnl_usd:+.2f} USD.",
+        )
+        await self._persist(session_id)
+        await self._notify(session_id, "settled")
 
     async def _attempt_emergency_close(self, record: _TradeSessionRecord, leg_name: str) -> None:
         target_leg = record.response.long_leg if leg_name == "long" else record.response.short_leg
@@ -607,7 +777,7 @@ class TradeManager:
                 "X-AUTH-SIGNATURE": signature,
                 "X-AUTH-APIKEY": credential.api_key,
                 "X-AUTH-EPOCH": str(epoch_time),
-                "User-Agent": "ArbRadar/1.0",
+                "User-Agent": "Fundex/1.0",
             },
         )
         response.raise_for_status()
@@ -671,7 +841,7 @@ class TradeManager:
                 "X-AUTH-SIGNATURE": signature,
                 "X-AUTH-APIKEY": credential.api_key,
                 "X-AUTH-EPOCH": str(epoch_time),
-                "User-Agent": "ArbRadar/1.0",
+                "User-Agent": "Fundex/1.0",
             },
         )
         if response.status_code >= 400:
@@ -1110,6 +1280,7 @@ class TradeManager:
         record.response.current_phase = phase
         record.response.updated_at = timestamp
         record.response.events.append(TradeEvent(at=timestamp, phase=status, message=message))
+        await self._persist(session_id)
 
     async def _mark_failed(self, session_id: str, message: str) -> None:
         try:
@@ -1122,16 +1293,8 @@ class TradeManager:
         record.response.updated_at = timestamp
         record.response.events.append(TradeEvent(at=timestamp, phase="failed", message=message, level="error"))
         record.response.warnings.append(message)
-
-    @staticmethod
-    def _paper_fill_price(session_id: str, leg: ExecutionLegPlan, *, stage: str) -> float:
-        ratio = _stable_ratio(session_id, leg.exchange, leg.exchange_symbol, leg.side, stage)
-        slippage_bps = (ratio - 0.5) * 10.0
-        if stage == "entry":
-            directional_bps = slippage_bps if leg.side == "buy" else -slippage_bps
-        else:
-            directional_bps = -slippage_bps if leg.side == "buy" else slippage_bps
-        return max(0.0000001, leg.reference_price * (1 + directional_bps / 10_000))
+        await self._persist(session_id)
+        self._spawn(self._notify(session_id, "failed"))
 
     @staticmethod
     def _leg_price_pnl(leg: TradeLegExecution) -> float:
@@ -1141,16 +1304,6 @@ class TradeManager:
             return (leg.exit_fill_price - leg.entry_fill_price) * leg.estimated_quantity
         return (leg.entry_fill_price - leg.exit_fill_price) * leg.estimated_quantity
 
-    def _apply_realized_paper_results(self, record: _TradeSessionRecord) -> None:
-        price_pnl = self._leg_price_pnl(record.response.long_leg) + self._leg_price_pnl(record.response.short_leg)
-        funding_ratio = 0.985 + (_stable_ratio(record.response.id, "funding") * 0.02)
-        realized_funding = record.plan.estimated_funding_pnl_usd * funding_ratio
-        realized_fees = record.plan.estimated_total_fees_usd
-        record.response.realized_price_pnl_usd = price_pnl
-        record.response.realized_funding_pnl_usd = realized_funding
-        record.response.realized_total_fees_usd = realized_fees
-        record.response.realized_net_pnl_usd = price_pnl + realized_funding - realized_fees
-
     async def _get_record(self, session_id: str) -> _TradeSessionRecord:
         async with self._lock:
             record = self._sessions.get(session_id)
@@ -1159,11 +1312,15 @@ class TradeManager:
         return record
 
     async def _sleep_until(self, target: datetime | None) -> None:
+        # asyncio.sleep runs on a monotonic clock that stops while the machine is suspended, so one long
+        # sleep can wake hours late. Re-check the wall clock in short steps instead.
         if target is None:
             return
-        delay = (target - _utcnow()).total_seconds()
-        if delay > 0:
-            await asyncio.sleep(delay)
+        while True:
+            remaining = (target - _utcnow()).total_seconds()
+            if remaining <= 0:
+                return
+            await asyncio.sleep(min(remaining, WALL_CLOCK_STEP_SECONDS))
 
     @staticmethod
     def _resolve_snapshot(snapshots: list[FundingSnapshot], canonical_symbol: str, exchange: ExchangeName) -> FundingSnapshot:
@@ -1171,6 +1328,14 @@ class TradeManager:
             if snapshot.canonical_symbol.upper() == canonical_symbol.upper() and snapshot.exchange == exchange:
                 return snapshot
         raise HTTPException(status_code=404, detail=f"Live snapshot missing for {canonical_symbol} on {exchange}.")
+
+    @staticmethod
+    def _settling_leg_names(opportunity: ArbitrageOpportunity, start: datetime, end: datetime) -> list[str]:
+        names: list[str] = []
+        for name, leg in (("long", opportunity.long_leg), ("short", opportunity.short_leg)):
+            if leg.next_funding_time is not None and start <= leg.next_funding_time <= end:
+                names.append(name)
+        return names
 
     @staticmethod
     def _pair_funding_time(opportunity: ArbitrageOpportunity) -> datetime | None:

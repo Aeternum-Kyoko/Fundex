@@ -11,12 +11,16 @@ import {
   formatFundingRate,
   formatLeverage,
   formatPct,
+  formatPrice,
   formatTimestamp,
   formatUsd,
   getExchangeCapabilityBadges,
   getNextFundingTime,
 } from "../lib/monitor";
-import type { ExchangeName } from "../lib/types";
+import type { ArbitrageOpportunity, ExchangeName } from "../lib/types";
+import { whoPays } from "../terminal/capture";
+import { Dialog } from "../terminal/panels";
+import { Countdown } from "../terminal/primitives";
 import type {
   TradeCredentialInput,
   TradeCredentialVerificationResponse,
@@ -47,10 +51,37 @@ function buildSupportNote(exchange: ExchangeName) {
       return { live: true, note: "CoinSwitch leverage must already be configured on the venue." };
     case "delta":
       return { live: true, note: "Delta live mode is supported with market orders and integer contract sizing." };
+    case "wazirx":
+      return { live: false, note: "WazirX is monitor-only for now; live order routing is not wired up." };
     default:
       return { live: false, note: "Live support unavailable." };
   }
 }
+
+// Mirrors backend reverse_opportunity: funding flips sign, but fees and slippage are still paid.
+function reverseOpportunityView(opportunity: ArbitrageOpportunity): ArbitrageOpportunity {
+  const netReturn = -opportunity.expected_funding_percent - opportunity.estimated_total_cost_percent;
+  return {
+    ...opportunity,
+    long_leg: opportunity.short_leg,
+    short_leg: opportunity.long_leg,
+    spread_rate: -opportunity.spread_rate,
+    spread_rate_hourly: -opportunity.spread_rate_hourly,
+    gross_apr_percent: -opportunity.gross_apr_percent,
+    expected_funding_percent: -opportunity.expected_funding_percent,
+    net_return_percent: netReturn,
+    net_apr_percent: (netReturn * 8760) / Math.max(opportunity.holding_horizon_hours, 1),
+    break_even_hours: null,
+  };
+}
+
+const FUNDING_STATUS_LABEL: Record<string, string> = {
+  not_applicable: "No settlement inside this trade",
+  pending: "Prediction (settled rate pending)",
+  settled: "Settled rate from the exchange",
+  partly_estimated: "Partly settled, partly estimated",
+  estimated: "Estimated (venue publishes no history)",
+};
 
 function triggerFileDownload(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
@@ -73,7 +104,7 @@ function exportCredentialFile(credentials: TradeCredentialState) {
     credentials,
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-  triggerFileDownload(blob, `arbradar-trade-keys-${new Date().toISOString().slice(0, 19).replace(/:/g, "-")}.json`);
+  triggerFileDownload(blob, `fundex-trade-keys-${new Date().toISOString().slice(0, 19).replace(/:/g, "-")}.json`);
 }
 
 function readPaperGuideSeen() {
@@ -185,7 +216,7 @@ function getCancelTradeNote(session: TradeSessionResponse | null, nowTimestamp: 
   if (!canCancelTrade(session, nowTimestamp)) {
     return `Trades lock during the final ${CANCEL_LOCK_WINDOW_MINUTES} minutes before entry.`;
   }
-  return `Cancellation stays open until ${formatCountdown(session.cancellable_until, nowTimestamp)}.`;
+  return `You can cancel for another ${formatCountdown(session.cancellable_until, nowTimestamp)}; after that the trade locks until it runs.`;
 }
 
 function formatPermissionLabel(level: "trading" | "read_only" | "unknown" | undefined) {
@@ -237,7 +268,7 @@ function buildTradePdf(session: TradeSessionResponse) {
     addBlock(title, { size: 13, bold: true, spacingBefore: 8, spacingAfter: 4 });
     addMetric("Exchange", `${leg.display_name} (${leg.exchange_symbol})`);
     addMetric("Side", leg.side.toUpperCase());
-    addMetric("Reference price", formatUsd(leg.reference_price));
+    addMetric("Reference price", formatPrice(leg.reference_price));
     addMetric("Quantity", leg.estimated_quantity.toFixed(6));
     addMetric("Leverage", `${leg.leverage.toFixed(2)}x`);
     addMetric("Max leverage", formatLeverage(leg.max_leverage));
@@ -245,15 +276,15 @@ function buildTradePdf(session: TradeSessionResponse) {
     addMetric("Initial margin", formatUsd(leg.initial_margin_usd));
     addMetric("Entry order ID", leg.entry_order_id ?? "pending");
     addMetric("Exit order ID", leg.exit_order_id ?? "pending");
-    addMetric("Entry fill", formatUsd(leg.entry_fill_price));
-    addMetric("Exit fill", formatUsd(leg.exit_fill_price));
+    addMetric("Entry fill", formatPrice(leg.entry_fill_price));
+    addMetric("Exit fill", formatPrice(leg.exit_fill_price));
     if (leg.support_note) {
       addMetric("Support note", leg.support_note);
     }
     addMetric("Trade URL", leg.trade_url);
   };
 
-  addBlock(`ArbRadar Trade Report`, { size: 18, bold: true, spacingAfter: 6 });
+  addBlock(`Fundex Trade Report`, { size: 18, bold: true, spacingAfter: 6 });
   addBlock(`${session.canonical_symbol} | ${session.mode === "paper" ? "Paper" : "Live"} | ${session.scenario === "best" ? "Best setup" : "Reverse setup"}`, {
     size: 12,
     spacingAfter: 12,
@@ -302,119 +333,108 @@ function buildTradePdf(session: TradeSessionResponse) {
 
 function exportTradePdf(session: TradeSessionResponse) {
   const doc = buildTradePdf(session);
-  doc.save(`arbradar-trade-report-${session.canonical_symbol}-${session.id.slice(0, 8)}.pdf`);
+  doc.save(`fundex-trade-report-${session.canonical_symbol}-${session.id.slice(0, 8)}.pdf`);
 }
 
-function TradeReportContent({ session, nowTimestamp }: { session: TradeSessionResponse; nowTimestamp: number }) {
-  const netTone = getTradeResultTone(session);
-  const netReturnPercent = getTradeNetReturnPercent(session);
+const FUNDING_SOURCE_LABEL: Record<string, string> = {
+  pending: "waiting",
+  exchange_history: "settled, from exchange history",
+  post_settlement_feed: "settled, from the exchange feed",
+  estimate: "estimate (no history published)",
+};
 
+function money(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return "—";
+  const sign = value > 0 ? "+" : value < 0 ? "−" : "";
+  return `${sign}$${Math.abs(value).toFixed(2)}`;
+}
+
+function TradeReportContent({ session }: { session: TradeSessionResponse; nowTimestamp: number }) {
+  const net = session.realized_net_pnl_usd ?? session.expected_net_pnl_usd;
+  const done = session.realized_net_pnl_usd != null;
   return (
-    <div className="trade-report-body">
-      <div className="summary-grid compare-summary-grid trade-report-summary-grid">
-        <article className="summary-card"><span className="subtle">Status</span><strong>{session.status}</strong></article>
-        <article className="summary-card"><span className="subtle">Capital</span><strong>{formatUsd(session.capital_input_usd)}</strong></article>
-        <article className="summary-card"><span className="subtle">Leverage</span><strong>{session.leverage.toFixed(2)}x</strong></article>
-        <article className="summary-card"><span className="subtle">Pair funding</span><strong>{formatTimestamp(session.pair_funding_time)}</strong></article>
-        <article className="summary-card"><span className="subtle">Scheduled entry</span><strong>{formatTimestamp(session.scheduled_entry_at)}</strong></article>
-        <article className="summary-card"><span className="subtle">Scheduled exit</span><strong>{formatTimestamp(session.scheduled_exit_at)}</strong></article>
-        <article className="summary-card"><span className="subtle">Cancel until</span><strong>{formatTimestamp(session.cancellable_until)}</strong></article>
-        <article className="summary-card"><span className="subtle">Current phase</span><strong>{session.current_phase}</strong></article>
-        <article className="summary-card"><span className="subtle">Projected net</span><strong>{formatUsd(session.expected_net_pnl_usd)}</strong></article>
-        <article className="summary-card"><span className="subtle">Projected return</span><strong>{formatPct(session.expected_net_return_on_capital_percent)}</strong></article>
-        <article className="summary-card"><span className="subtle">Realized net</span><strong>{formatUsd(session.realized_net_pnl_usd ?? session.expected_net_pnl_usd)}</strong></article>
-        <article className={`summary-card trade-summary-tone trade-summary-tone-${netTone}`}><span className="subtle">Net return on capital</span><strong>{formatPct(netReturnPercent)}</strong></article>
+    <div className="td-report">
+      <div className="t-bigline">
+        <strong className={`t-num ${net >= 0 ? "t-receive" : "t-pay"}`}>{money(net)}</strong>
+        <span className="t-soft">
+          {done ? "net result" : "projected net"}, {formatPct(getTradeNetReturnPercent(session))} of ${session.capital_input_usd.toLocaleString()} capital
+        </span>
       </div>
+      <p className="t-soft" style={{ margin: "0 0 14px" }}>
+        {session.mode === "paper" ? "Paper" : "Live"} trade, {session.strategy === "capture" ? "next funding" : "hold"}, {session.scenario === "best" ? "best" : "reverse"} side. Status {session.status}:{" "}
+        {session.current_phase}.
+      </p>
 
-      <div className="trade-plan-grid">
-        {[session.long_leg, session.short_leg].map((leg) => (
-          <article key={`${session.id}-${leg.exchange}-${leg.exchange_symbol}`} className={`overview-card compare-exchange-card ${exchangeToneClass(leg.exchange)}`}>
-            <div className="overview-card-header">
-              <div>
-                <p className="eyebrow">{getTradeLegLabel(leg)}</p>
-                <strong>{leg.display_name}</strong>
-              </div>
-              <span className={`quality-badge quality-${leg.status === "closed" ? "positive" : leg.status === "failed" ? "danger" : "neutral"}`}>{leg.status}</span>
-            </div>
-            <div className="detail-grid compare-detail-grid">
-              <div><span className="subtle">Exchange symbol</span><strong>{leg.exchange_symbol}</strong></div>
-              <div><span className="subtle">Side</span><strong>{leg.side.toUpperCase()}</strong></div>
-              <div><span className="subtle">Reference price</span><strong>{formatUsd(leg.reference_price)}</strong></div>
-              <div><span className="subtle">Quantity</span><strong>{leg.estimated_quantity.toFixed(6)}</strong></div>
-              <div><span className="subtle">Leverage</span><strong>{leg.leverage.toFixed(2)}x</strong></div>
-              <div><span className="subtle">Max leverage</span><strong>{formatLeverage(leg.max_leverage)}</strong></div>
-              <div><span className="subtle">Notional</span><strong>{formatUsd(leg.notional_usd)}</strong></div>
-              <div><span className="subtle">Initial margin</span><strong>{formatUsd(leg.initial_margin_usd)}</strong></div>
-              <div><span className="subtle">Entry order ID</span><strong>{leg.entry_order_id ?? "pending"}</strong></div>
-              <div><span className="subtle">Exit order ID</span><strong>{leg.exit_order_id ?? "pending"}</strong></div>
-              <div><span className="subtle">Entry fill</span><strong>{formatUsd(leg.entry_fill_price)}</strong></div>
-              <div><span className="subtle">Exit fill</span><strong>{formatUsd(leg.exit_fill_price)}</strong></div>
-            </div>
-            {leg.support_note ? <p className="subtle trade-support-note">{leg.support_note}</p> : null}
-            <a href={leg.trade_url} target="_blank" rel="noreferrer" className="action-button secondary-button trade-leg-link">
-              Open {leg.display_name}
-            </a>
-          </article>
-        ))}
-      </div>
+      <dl className="t-kv">
+        <div><dt>Funding</dt><dd className={`t-num ${(session.realized_funding_pnl_usd ?? session.expected_funding_pnl_usd) >= 0 ? "t-receive" : "t-pay"}`}>{money(session.realized_funding_pnl_usd ?? session.expected_funding_pnl_usd)}</dd></div>
+        <div><dt>Price moves between legs</dt><dd className="t-num">{money(session.realized_price_pnl_usd)}</dd></div>
+        <div><dt>Fees</dt><dd className="t-num t-pay">{money(session.realized_total_fees_usd != null ? -session.realized_total_fees_usd : -session.estimated_total_fees_usd)}</dd></div>
+        <div><dt>Slippage, actual vs planned</dt><dd className="t-num">{formatUsd(session.realized_slippage_usd ?? null)} vs {formatUsd(session.expected_slippage_usd ?? null)}</dd></div>
+        <div><dt>Funding source</dt><dd>{FUNDING_STATUS_LABEL[session.funding_status ?? "not_applicable"]}</dd></div>
+      </dl>
 
-      <div className="trade-report-grid">
-        <article className="overview-card trade-report-card">
-          <div className="overview-card-header">
-            <div>
-              <p className="eyebrow">Outcome</p>
-              <strong>{session.realized_net_pnl_usd == null ? "Projected until completion" : "Completed trade outcome"}</strong>
-            </div>
-          </div>
-          <div className="detail-grid compare-detail-grid">
-            <div><span className="subtle">Projected funding capture</span><strong>{formatUsd(session.expected_funding_pnl_usd)}</strong></div>
-            <div><span className="subtle">Estimated fees</span><strong>{formatUsd(session.estimated_total_fees_usd)}</strong></div>
-            <div><span className="subtle">Realized price PnL</span><strong>{formatUsd(session.realized_price_pnl_usd)}</strong></div>
-            <div><span className="subtle">Realized funding PnL</span><strong>{formatUsd(session.realized_funding_pnl_usd)}</strong></div>
-            <div><span className="subtle">Realized total fees</span><strong>{formatUsd(session.realized_total_fees_usd)}</strong></div>
-            <div><span className="subtle">Updated</span><strong>{formatTimestamp(session.updated_at)}</strong></div>
-          </div>
-        </article>
-
-        <article className="overview-card trade-report-card">
-          <div className="overview-card-header">
-            <div>
-              <p className="eyebrow">Warnings</p>
-              <strong>{session.warnings.length ? `${session.warnings.length} item${session.warnings.length === 1 ? "" : "s"}` : "No warnings recorded"}</strong>
-            </div>
-          </div>
-          {session.warnings.length ? (
-            <ul className="warning-list compare-warning-list">
-              {session.warnings.map((warning) => (
-                <li key={warning}>{warning}</li>
-              ))}
-            </ul>
-          ) : (
-            <p className="subtle">The session finished without adding extra warnings beyond the initial risk checks.</p>
-          )}
-          <p className="subtle trade-inline-note">{getCancelTradeNote(session, nowTimestamp)}</p>
-        </article>
-      </div>
-
-      <article className="overview-card trade-report-card trade-event-card">
-        <div className="overview-card-header">
-          <div>
-            <p className="eyebrow">Event Log</p>
-            <strong>{session.events.length} event{session.events.length === 1 ? "" : "s"} captured</strong>
-          </div>
+      {session.funding_legs?.length ? (
+        <div className="t-section">
+          <h3>Funding per leg</h3>
+          <ul className="t-list">
+            {session.funding_legs.map((leg) => (
+              <li key={`${leg.exchange}-${leg.side}`}>
+                <span>
+                  {exchangeLabel(leg.exchange)} {leg.side}: predicted {formatPct(leg.predicted_rate * 100, 4)}
+                  {leg.actual_rate != null ? `, settled ${formatPct(leg.actual_rate * 100, 4)}` : ""}
+                  <span className="t-muted"> ({FUNDING_SOURCE_LABEL[leg.source] ?? leg.source})</span>
+                </span>
+                <span className={`t-num ${(leg.payment_usd ?? 0) >= 0 ? "t-receive" : "t-pay"}`}>{money(leg.payment_usd)}</span>
+              </li>
+            ))}
+          </ul>
         </div>
-        <div className="recent-alert-list">
-          {session.events.map((event) => (
-            <div key={`${session.id}-${event.at}-${event.phase}-${event.message}`} className={`alert-log-item trade-event-log trade-event-level-${event.level}`}>
-              <div className="alert-item-top">
-                <strong>{event.phase}</strong>
-                <span>{formatTimestamp(event.at)}</span>
-              </div>
-              <div className="subtle">{event.message}</div>
+      ) : null}
+
+      <div className="t-section">
+        <h3>Legs</h3>
+        <div className="t-leg-grid">
+          {[session.long_leg, session.short_leg].map((leg) => (
+            <div key={`${session.id}-${leg.exchange}`} className="t-leg">
+              <span className="t-leg-side">{getTradeLegLabel(leg)}, {leg.status}</span>
+              <strong style={{ color: `var(--x-${leg.exchange})` }}>{leg.display_name}</strong>
+              <dl className="t-kv">
+                <div><dt>Entry fill</dt><dd className="t-num">{formatPrice(leg.entry_fill_price)}</dd></div>
+                <div><dt>Exit fill</dt><dd className="t-num">{formatPrice(leg.exit_fill_price)}</dd></div>
+                <div><dt>Quantity</dt><dd className="t-num">{leg.estimated_quantity.toFixed(4)}</dd></div>
+                <div><dt>Leverage</dt><dd className="t-num">{leg.leverage.toFixed(1)}x</dd></div>
+                <div><dt>Order</dt><dd className="t-num t-muted">{leg.entry_order_id ?? "pending"}</dd></div>
+              </dl>
             </div>
           ))}
         </div>
-      </article>
+      </div>
+
+      {session.warnings.length ? (
+        <div className="t-section">
+          <h3>Warnings</h3>
+          <ul className="t-checks">
+            {session.warnings.map((warning) => (
+              <li key={warning} className="t-check" data-status="warn">
+                <span aria-hidden="true">!</span>
+                <span>{warning}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      <div className="t-section">
+        <h3>What happened</h3>
+        <ol className="td-log">
+          {session.events.map((event) => (
+            <li key={`${session.id}-${event.at}-${event.phase}-${event.message}`} data-level={event.level}>
+              <span className="t-num t-muted">{new Date(event.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>
+              <span>{event.message}</span>
+            </li>
+          ))}
+        </ol>
+      </div>
     </div>
   );
 }
@@ -422,6 +442,10 @@ function TradeReportContent({ session, nowTimestamp }: { session: TradeSessionRe
 export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }) {
   const [paperTradingEnabled, setPaperTradingEnabled] = useState(true);
   const [scenario, setScenario] = useState<"best" | "reverse">("best");
+  // Same default as the dashboard: catch the next settlement. "hold" keeps the multi-day hedge.
+  const [strategy, setStrategy] = useState<"capture" | "hold">(() =>
+    new URLSearchParams(window.location.search).get("strategy") === "hold" ? "hold" : "capture",
+  );
   const [capitalInput, setCapitalInput] = useState("1000");
   const [leverageInput, setLeverageInput] = useState("2");
   const [exchangeLeverageInput, setExchangeLeverageInput] = useState<Record<string, string>>({});
@@ -441,7 +465,7 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
     return exchanges ? exchanges.split(",").map((item) => item.trim().toLowerCase()).filter(Boolean) : [];
   }, []);
 
-  const { comparison, loading, error } = useSymbolComparison(canonicalSymbol, selectedExchanges);
+  const { comparison, loading, error } = useSymbolComparison(canonicalSymbol, selectedExchanges, strategy);
   const bestOpportunity = comparison?.best_opportunity ?? null;
   const capitalUsd = Number(capitalInput) > 0 ? Number(capitalInput) : 1000;
   const leverage = Number(leverageInput) > 0 ? Number(leverageInput) : 2;
@@ -464,6 +488,7 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
     leverageByExchange: leverageOverrides,
     holdingPeriods: 1,
     reverse: false,
+    strategy,
   });
   const { plan: reversePlan, loading: reversePlanLoading, error: reversePlanError } = useExecutionPlan(bestOpportunity?.canonical_symbol ?? null, Boolean(bestOpportunity), selectedExchanges, {
     capitalUsd,
@@ -471,6 +496,7 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
     leverageByExchange: leverageOverrides,
     holdingPeriods: 1,
     reverse: true,
+    strategy,
   });
   const { session, history, loading: sessionLoading, error: sessionError, createSession, cancelSession, clearHistory } = useTradeSession(canonicalSymbol);
 
@@ -480,7 +506,7 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
   const activeOpportunity = useMemo(() => {
     if (!bestOpportunity) return null;
     return scenario === "reverse"
-      ? { ...bestOpportunity, long_leg: bestOpportunity.short_leg, short_leg: bestOpportunity.long_leg, spread_rate: -bestOpportunity.spread_rate, net_apr_percent: -bestOpportunity.net_apr_percent, gross_apr_percent: -bestOpportunity.gross_apr_percent }
+      ? reverseOpportunityView(bestOpportunity)
       : bestOpportunity;
   }, [bestOpportunity, scenario]);
   const fundingTime = useMemo(() => (activeOpportunity ? getNextFundingTime(activeOpportunity) : null), [activeOpportunity]);
@@ -625,6 +651,7 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
       selected_exchanges: selectedExchanges as ExchangeName[],
       mode,
       scenario,
+      strategy,
       capital_usd: capitalUsd,
       leverage,
       leverage_overrides: leverageOverrides as Partial<Record<ExchangeName, number>>,
@@ -743,478 +770,369 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
     }
   };
 
+  const settlementAt = fundingTime;
+  const cancelLockAt = scheduledEntryAt ? new Date(new Date(scheduledEntryAt).getTime() - CANCEL_LOCK_WINDOW_MINUTES * 60_000).toISOString() : null;
+  const capture = bestOpportunity?.capture ?? null;
+  const steps: Array<{ key: string; label: string; at: string | null }> = [
+    { key: "armed", label: "Armed", at: session?.created_at ?? null },
+    { key: "entering", label: "Enter", at: session?.scheduled_entry_at ?? scheduledEntryAt },
+    { key: "settle", label: "Funding settles", at: session?.pair_funding_time ?? settlementAt },
+    { key: "exiting", label: "Exit", at: session?.scheduled_exit_at ?? scheduledExitAt },
+    { key: "completed", label: "Result", at: null },
+  ];
+  const stepIndex = !session
+    ? -1
+    : session.status === "armed"
+      ? 0
+      : session.status === "entering" || session.status === "entered"
+        ? 1
+        : session.status === "exiting"
+          ? 3
+          : 4;
+  const symbolBase = (comparison?.canonical_symbol ?? canonicalSymbol).split("-")[0];
+
   return (
-    <main className="page compare-page trade-page">
-      <section className="hero compare-hero">
+    <main className="t-main td-page">
+      <header className="td-head">
         <div>
-          <p className="eyebrow">Trade Workspace</p>
-          <h1>{comparison?.canonical_symbol ?? canonicalSymbol}</h1>
-          <p className="lede">Review the live hedge, choose best or reverse, load exchange credentials locally, and arm either a paper run or a real scheduled execution around funding.</p>
-          <div className="compare-top-actions">
-            <a href="/trade" className="action-button secondary-button compare-link">Back to trade desk</a>
-            <a href={`/compare/${encodeURIComponent(canonicalSymbol)}${selectedExchanges.length ? `?exchanges=${encodeURIComponent(selectedExchanges.join(","))}` : ""}`} className="action-button secondary-button compare-link">Open compare</a>
+          <a className="td-back" href="/">Dashboard</a>
+          <h1 className="td-title">{symbolBase}</h1>
+          <p className="t-soft td-sub">
+            {activeOpportunity
+              ? `Buy on ${activeOpportunity.long_leg.display_name}, sell on ${activeOpportunity.short_leg.display_name}. ${
+                  strategy === "capture" ? "In just before the settlement, out right after." : "Hold the hedge across settlements."
+                }`
+              : loading
+                ? "Loading the live setup…"
+                : "No live setup for this coin in the current exchange scope."}
+          </p>
+        </div>
+        <div className="td-switches">
+          <div className="t-segmented t-strategy" role="group" aria-label="Strategy">
+            <button type="button" aria-pressed={strategy === "capture"} onClick={() => setStrategy("capture")}>Next funding</button>
+            <button type="button" aria-pressed={strategy === "hold"} onClick={() => setStrategy("hold")}>Hold</button>
+          </div>
+          <div className="t-segmented" role="group" aria-label="Side">
+            <button type="button" aria-pressed={scenario === "best"} onClick={() => setScenario("best")}>Best side</button>
+            <button type="button" aria-pressed={scenario === "reverse"} onClick={() => setScenario("reverse")}>Reverse</button>
+          </div>
+          <div className="t-segmented td-mode" role="group" aria-label="Mode" data-live={!paperTradingEnabled}>
+            <button type="button" aria-pressed={paperTradingEnabled} onClick={() => handlePaperTradingToggle(true)}>Paper</button>
+            <button type="button" aria-pressed={!paperTradingEnabled} onClick={() => handlePaperTradingToggle(false)}>Live</button>
           </div>
         </div>
-        <div className="hero-card compare-hero-card">
-          <span className="chip">{paperTradingEnabled ? "Paper mode" : "Live mode"}</span>
-          <strong>{activePlan ? `${activePlan.long_leg.display_name} / ${activePlan.short_leg.display_name}` : "Waiting for plan"}</strong>
-          <p>Entry starts {scheduledEntryAt ? formatCountdown(scheduledEntryAt, nowTimestamp) : "n/a"} before funding and exits {exitLagSeconds}s after the new funding window opens.</p>
-          <label className="trade-mode-toggle">
-            <input type="checkbox" checked={paperTradingEnabled} onChange={(event) => handlePaperTradingToggle(event.target.checked)} />
-            <span className="trade-mode-toggle-label">
-              <strong>Paper trading</strong>
-              <span className="subtle">{paperTradingEnabled ? "Demo credentials and simulated fills are active." : "Live credentials and real orders are active."}</span>
-            </span>
-          </label>
-          {!paperTradingEnabled && !liveModeAvailable ? <p className="subtle">Live mode is limited because one leg is still paper-only for this setup.</p> : null}
+      </header>
+
+      {[error, planError, sessionError].filter(Boolean).map((message) => (
+        <div key={message} className="t-banner" role="alert">{message}</div>
+      ))}
+      {credentialFileNotice ? <div className="t-capture-note">{credentialFileNotice}</div> : null}
+      {!paperTradingEnabled ? (
+        <div className="td-live-banner" role="status">
+          Live mode sends real orders with your keys. Verify both exchanges below before arming.
         </div>
-      </section>
+      ) : null}
 
-      {error ? <div className="banner banner-error">{error}</div> : null}
-      {planError ? <div className="banner banner-error">{planError}</div> : null}
-      {sessionError ? <div className="banner banner-error">{sessionError}</div> : null}
-      {credentialFileNotice ? <div className="banner">{credentialFileNotice}</div> : null}
+      <div className="td-grid">
+        <div className="td-main">
+          <section className="td-clock">
+            <div className="td-clock-top">
+              <div>
+                <span className="t-soft">{session && !isTerminalTradeStatus(session.status) ? session.current_phase : "Funding settles in"}</span>
+                <strong className="td-clock-big t-num">
+                  {settlementAt ? <Countdown target={session?.pair_funding_time ?? settlementAt} /> : "—"}
+                </strong>
+                <span className="t-muted">
+                  {settlementAt ? new Date(session?.pair_funding_time ?? settlementAt).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" }) : ""}
+                  {capture && strategy === "capture" ? `, ${whoPays(capture).toLowerCase()}` : ""}
+                </span>
+              </div>
+              <dl className="td-clock-facts">
+                <div><dt>Enter in</dt><dd className="t-num"><Countdown target={session?.scheduled_entry_at ?? scheduledEntryAt} /></dd></div>
+                <div><dt>Exit in</dt><dd className="t-num"><Countdown target={session?.scheduled_exit_at ?? scheduledExitAt} /></dd></div>
+                <div><dt>Cancel locks in</dt><dd className="t-num"><Countdown target={session?.cancellable_until ?? cancelLockAt} /></dd></div>
+              </dl>
+            </div>
+            <ol className="td-steps" aria-label="Trade timeline">
+              {steps.map((step, index) => (
+                <li key={step.key} data-state={index < stepIndex ? "done" : index === stepIndex ? "now" : "next"} data-failed={index === stepIndex && session?.status === "failed"}>
+                  <i aria-hidden="true" />
+                  <span>{step.label}</span>
+                  <small className="t-num">
+                    {step.at ? new Date(step.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : index === 4 && session?.realized_net_pnl_usd != null ? money(session.realized_net_pnl_usd) : ""}
+                  </small>
+                </li>
+              ))}
+            </ol>
+          </section>
 
-      <section className="summary-grid compare-summary-grid">
-        <article className="summary-card"><span className="subtle">Pair funding</span><strong>{fundingTime ? formatCountdown(fundingTime, nowTimestamp) : "n/a"}</strong></article>
-        <article className="summary-card"><span className="subtle">Entry starts</span><strong>{scheduledEntryAt ? formatCountdown(scheduledEntryAt, nowTimestamp) : "n/a"}</strong></article>
-        <article className="summary-card"><span className="subtle">Exit starts</span><strong>{scheduledExitAt ? formatCountdown(scheduledExitAt, nowTimestamp) : "n/a"}</strong></article>
-        <article className="summary-card"><span className="subtle">Cancel closes</span><strong>{scheduledEntryAt ? formatCountdown(new Date(new Date(scheduledEntryAt).getTime() - CANCEL_LOCK_WINDOW_MINUTES * 60_000).toISOString(), nowTimestamp) : "n/a"}</strong></article>
-        <article className="summary-card"><span className="subtle">Mode</span><strong>{paperTradingEnabled ? "paper" : "live"}</strong></article>
-        <article className="summary-card"><span className="subtle">Scenario</span><strong>{scenario === "best" ? "Best setup" : "Reverse setup"}</strong></article>
-      </section>
-
-      <section className="panel compare-panel">
-        <div className="panel-header">
-          <div>
-            <p className="eyebrow">Trade Setup</p>
-            <h2>Choose the exact hedge to arm</h2>
-            <div className="subtle">Paper and live use the same execution plan. The paper layer stays visible so you can test the path before firing real orders.</div>
-          </div>
-          <div className="panel-note">{planLoading ? "Refreshing plan" : activePlan ? "Plan ready" : loading ? "Loading pair" : "No live pair"}</div>
-        </div>
-
-        <div className="execution-controls">
-          <div className="execution-capital-group">
-            <label className="control execution-capital-input"><span className="subtle">Capital (USD)</span><input type="number" min="1" step="any" value={capitalInput} onChange={(event) => setCapitalInput(event.target.value)} /></label>
-            <label className="control execution-capital-input"><span className="subtle">Leverage</span><input type="number" min="1" step="0.1" value={leverageInput} onChange={(event) => setLeverageInput(event.target.value)} /></label>
-            <label className="control execution-capital-input"><span className="subtle">Enter before funding (s)</span><input type="number" min="0" step="1" value={entrySecondsBefore} onChange={(event) => setEntrySecondsBefore(event.target.value)} /></label>
-            <label className="control execution-capital-input"><span className="subtle">Exit after funding (s)</span><input type="number" min="0" step="1" value={exitSecondsAfter} onChange={(event) => setExitSecondsAfter(event.target.value)} /></label>
-          </div>
-          {requiredExchanges.length ? (
-            <div className="execution-capital-group">
+          <section className="t-panel td-section">
+            <h3>Size and timing</h3>
+            <div className="td-fields">
+              <label className="t-field">Capital (USD)<input type="number" min="1" step="any" inputMode="decimal" value={capitalInput} onChange={(event) => setCapitalInput(event.target.value)} /></label>
+              <label className="t-field">Leverage<input type="number" min="1" step="0.1" inputMode="decimal" value={leverageInput} onChange={(event) => setLeverageInput(event.target.value)} /></label>
+              <label className="t-field">Enter before funding (s)<input type="number" min="0" step="1" inputMode="numeric" value={entrySecondsBefore} onChange={(event) => setEntrySecondsBefore(event.target.value)} /></label>
+              <label className="t-field">Exit after funding (s)<input type="number" min="0" step="1" inputMode="numeric" value={exitSecondsAfter} onChange={(event) => setExitSecondsAfter(event.target.value)} /></label>
               {requiredExchanges.map((exchange) => (
-                <label key={`override-${exchange}`} className="control execution-capital-input">
-                  <span className="subtle">
-                    {exchangeLabel(exchange)} leverage
-                    {leverageMaxByExchange[exchange] ? ` (max ${leverageMaxByExchange[exchange]!.toFixed(2)}x)` : ""}
-                  </span>
-                  <input
-                    type="number"
-                    min="1"
-                    step="0.1"
-                    value={exchangeLeverageInput[exchange] ?? ""}
-                    placeholder={`${leverage.toFixed(2)}x default`}
-                    onChange={(event) => setLeverageOverrideValue(exchange, event.target.value)}
-                  />
+                <label key={`override-${exchange}`} className="t-field">
+                  {exchangeLabel(exchange)} leverage{leverageMaxByExchange[exchange] ? ` (max ${leverageMaxByExchange[exchange]!.toFixed(0)}x)` : ""}
+                  <input type="number" min="1" step="0.1" inputMode="decimal" value={exchangeLeverageInput[exchange] ?? ""} placeholder={`${leverage.toFixed(1)}x`} onChange={(event) => setLeverageOverrideValue(exchange, event.target.value)} />
                 </label>
               ))}
             </div>
-          ) : null}
-          <div className="execution-scenario-toggle">
-            <button type="button" className={`overview-button execution-chip ${scenario === "best" ? "execution-chip-active" : ""}`} onClick={() => setScenario("best")}>Best setup</button>
-            <button type="button" className={`overview-button execution-chip ${scenario === "reverse" ? "execution-chip-active" : ""}`} onClick={() => setScenario("reverse")}>Reverse setup</button>
-          </div>
-        </div>
+          </section>
 
-        {activePlan && activeOpportunity ? (
-          <div className="trade-plan-grid">
-            {[activeOpportunity.long_leg, activeOpportunity.short_leg].map((leg) => {
-              const support = buildSupportNote(leg.exchange);
-              const comparisonRow = comparison?.exchanges.find((item) => item.exchange === leg.exchange && item.exchange_symbol === leg.exchange_symbol) ?? null;
-              const executionLeg = leg.exchange === activeOpportunity.long_leg.exchange ? activePlan.long_leg : activePlan.short_leg;
-              return (
-                <article key={`${leg.exchange}-${leg.exchange_symbol}`} className={`overview-card compare-exchange-card ${exchangeToneClass(leg.exchange)}`}>
-                  <div className="overview-card-header">
-                    <div>
-                      <p className="eyebrow">{leg.exchange === activeOpportunity.long_leg.exchange ? "Long leg" : "Short leg"}</p>
-                      <strong>{leg.display_name}</strong>
+          <section className="td-section">
+            <h3 className="td-h3">The two legs</h3>
+            {activePlan && activeOpportunity ? (
+              <div className="t-leg-grid">
+                {[activeOpportunity.long_leg, activeOpportunity.short_leg].map((leg) => {
+                  const support = buildSupportNote(leg.exchange);
+                  const isLong = leg.exchange === activeOpportunity.long_leg.exchange;
+                  const executionLeg = isLong ? activePlan.long_leg : activePlan.short_leg;
+                  const receives = isLong ? leg.funding_rate < 0 : leg.funding_rate > 0;
+                  return (
+                    <div key={`${leg.exchange}-${leg.exchange_symbol}`} className="t-leg">
+                      <span className="t-leg-side">{isLong ? "Buy (long)" : "Sell (short)"} {leg.exchange_symbol}</span>
+                      <strong style={{ color: `var(--x-${leg.exchange})` }}>{leg.display_name}</strong>
+                      <span className={`t-leg-rate t-num ${receives ? "t-receive" : "t-pay"}`}>
+                        {formatFundingRate(leg.funding_rate)} / {leg.funding_interval_hours ?? activeOpportunity.funding_interval_hours}h
+                      </span>
+                      <span className="t-muted">{receives ? "You receive this" : "You pay this"}, settles in <Countdown target={leg.next_funding_time} /></span>
+                      <dl className="t-kv">
+                        <div><dt>Quantity</dt><dd className="t-num">{executionLeg.estimated_quantity.toFixed(4)}</dd></div>
+                        <div><dt>Margin</dt><dd className="t-num">{formatUsd(executionLeg.initial_margin_usd)}</dd></div>
+                        <div><dt>Fees in + out</dt><dd className="t-num">{formatUsd(executionLeg.estimated_entry_fee_usd + executionLeg.estimated_exit_fee_usd)}</dd></div>
+                        <div><dt>Max leverage</dt><dd className="t-num">{formatLeverage(leg.max_leverage)}</dd></div>
+                      </dl>
+                      <span className={support.live ? "t-muted" : "t-pay"} style={{ fontSize: 13 }}>{support.live ? "Live orders supported." : support.note}</span>
                     </div>
-                    <span className={`quality-badge quality-${support.live ? "positive" : "warning"}`}>{support.live ? "Live-ready" : "Paper-only"}</span>
-                  </div>
-                  <div className="detail-grid compare-detail-grid">
-                    <div><span className="subtle">Funding</span><strong>{formatFundingRate(leg.funding_rate)}</strong></div>
-                    <div><span className="subtle">Next funding</span><strong>{formatCountdown(leg.next_funding_time, nowTimestamp)}</strong></div>
-                    <div><span className="subtle">Quantity</span><strong>{executionLeg.estimated_quantity.toFixed(6)}</strong></div>
-                    <div><span className="subtle">Max leverage</span><strong>{formatLeverage(leg.max_leverage)}</strong></div>
-                    <div><span className="subtle">Margin required</span><strong>{formatUsd(executionLeg.initial_margin_usd)}</strong></div>
-                    <div><span className="subtle">Estimated fees</span><strong>{formatUsd(executionLeg.estimated_entry_fee_usd + executionLeg.estimated_exit_fee_usd)}</strong></div>
-                  </div>
-                  {comparisonRow ? (
-                    <div className="quality-badge-row compare-capability-row">
-                      {getExchangeCapabilityBadges(comparisonRow).map((badge) => (
-                        <span key={badge.label} className={`quality-badge quality-${badge.tone}`}>{badge.label}</span>
-                      ))}
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="t-empty"><strong>{loading || planLoading ? "Building the plan…" : "No live setup right now"}</strong>{loading || planLoading ? "" : "Turn on more exchanges on the dashboard or pick another coin."}</div>
+            )}
+          </section>
+
+          <section className="t-panel td-section">
+            <h3>
+              Exchange API keys
+              <span className="t-muted" style={{ fontWeight: 400, fontSize: 13 }}>{paperTradingEnabled ? "Not needed for paper" : "Required for live"}</span>
+            </h3>
+            {paperTradingEnabled ? (
+              <p className="t-muted" style={{ margin: 0 }}>
+                Paper trades use demo keys and never touch your accounts. Switch to Live to enter real keys; they stay in this browser and in server memory only while a trade runs.
+              </p>
+            ) : (
+              <>
+                <div className="td-fields">
+                  {credentialInputs.map((item) => (
+                    <div key={item.exchange} className="td-keyset">
+                      <strong style={{ color: `var(--x-${item.exchange})` }}>{item.displayName}</strong>
+                      <label className="t-field">API key<input value={item.value.api_key} onChange={(event) => setCredentialValue(item.exchange, "api_key", event.target.value)} autoComplete="off" spellCheck={false} /></label>
+                      <label className="t-field">API secret<input type="password" value={item.value.api_secret} onChange={(event) => setCredentialValue(item.exchange, "api_secret", event.target.value)} autoComplete="new-password" /></label>
+                      {item.exchange === "coinswitch" ? (
+                        <label className="t-field">CoinSwitch exchange code<input value={item.value.extra?.exchange ?? DEFAULT_COINSWITCH_EXCHANGE} onChange={(event) => setCredentialExtra(item.exchange, "exchange", event.target.value)} /></label>
+                      ) : null}
+                      {!item.support.live ? <span className="t-pay" style={{ fontSize: 13 }}>{item.support.note}</span> : null}
                     </div>
-                  ) : null}
-                  <p className="subtle trade-support-note">{support.note}</p>
-                </article>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="empty-state"><p>{loading ? "Loading trade setup..." : "No live trade setup is available right now."}</p></div>
-        )}
-      </section>
-
-      <section className="panel compare-panel">
-        <div className="panel-header">
-          <div>
-            <p className="eyebrow">Credentials</p>
-            <h2>Keep keys local to the browser or a file</h2>
-            <div className="subtle">Keys are never written to our database. Live sessions keep them only in memory while the trade is armed and clear them after completion.</div>
-          </div>
-          <div className="panel-note">{paperTradingEnabled ? "Demo credentials auto-loaded" : "Needed for live mode"}</div>
-        </div>
-
-        <div className="button-row">
-          <label className="toggle-row"><input type="checkbox" checked={rememberCredentials} onChange={(event) => { setRememberCredentials(event.target.checked); persistCredentials(event.target.checked, credentials); setCredentialFileNotice(event.target.checked ? "Live credentials will be kept on this device until you switch this off." : "Stored device credentials were cleared from local storage."); }} /><span>Remember on this device</span></label>
-          <button type="button" className="action-button secondary-button" onClick={exportKeysFile}>Export keys file</button>
-          <button type="button" className="action-button secondary-button" onClick={() => fileInputRef.current?.click()}>Import keys file</button>
-          {!paperTradingEnabled ? (
-            <button
-              type="button"
-              className="action-button secondary-button"
-              onClick={() => void verifyLiveCredentials()}
-              disabled={verification.status === "checking" || !liveReadyForVerification}
-            >
-              {verification.status === "checking" ? "Verifying..." : "Verify APIs"}
-            </button>
-          ) : null}
-          <input ref={fileInputRef} type="file" accept="application/json" hidden onChange={(event) => {
-            const file = event.target.files?.[0];
-            if (file) {
-              void importKeysFile(file);
-            }
-            event.currentTarget.value = "";
-          }} />
-        </div>
-        {!paperTradingEnabled && verification.status !== "idle" ? (
-          <article className="overview-card">
-            <div className="overview-card-header">
-              <div>
-                <p className="eyebrow">Verification</p>
-                <strong>{verification.message}</strong>
-              </div>
-              <span className={`quality-badge quality-${verification.status === "success" ? "positive" : verification.status === "error" ? "danger" : "neutral"}`}>
-                {verification.status}
-              </span>
-            </div>
-            {verification.results ? (
-              <div className="detail-grid compare-detail-grid">
-                {verification.results.map((result) => (
-                  <div key={`verify-${result.exchange}`}>
-                    <span className="subtle">{exchangeLabel(result.exchange)} {result.ok ? "verified" : "failed"}</span>
-                    <strong>{formatPermissionLabel(result.permission_level)}</strong>
-                    <div className="subtle">
-                      {result.wallet_balance_usd != null || result.wallet_total_usd != null
-                        ? `Wallet available: ${formatUsd(result.wallet_balance_usd ?? null)} | Wallet total: ${formatUsd(result.wallet_total_usd ?? null)}`
-                        : result.wallet_balance_note ?? "Wallet data unavailable"}
-                    </div>
-                    {result.permission_note ? <div className="subtle">{result.permission_note}</div> : null}
+                  ))}
+                </div>
+                <div className="t-actions">
+                  <button type="button" className="t-btn" data-primary="true" onClick={() => void verifyLiveCredentials()} disabled={verification.status === "checking" || !liveReadyForVerification}>
+                    {verification.status === "checking" ? "Verifying…" : "Verify both exchanges"}
+                  </button>
+                  <label className="td-check">
+                    <input
+                      type="checkbox"
+                      checked={rememberCredentials}
+                      onChange={(event) => {
+                        setRememberCredentials(event.target.checked);
+                        persistCredentials(event.target.checked, credentials);
+                        setCredentialFileNotice(event.target.checked ? "Keys will be kept on this device until you switch this off." : "Keys were removed from this device.");
+                      }}
+                    />
+                    Remember on this device
+                  </label>
+                  <button type="button" className="t-btn" onClick={exportKeysFile}>Export keys file</button>
+                  <button type="button" className="t-btn" onClick={() => fileInputRef.current?.click()}>Import keys file</button>
+                </div>
+                {verification.status !== "idle" ? (
+                  <div className="td-verify" data-status={verification.status}>
+                    <strong>{verification.message}</strong>
+                    {verification.results?.map((result) => (
+                      <span key={`verify-${result.exchange}`} className={result.ok ? "t-receive" : "t-pay"}>
+                        {exchangeLabel(result.exchange)}: {result.ok ? formatPermissionLabel(result.permission_level) : result.message}
+                        {result.wallet_balance_usd != null ? `, ${formatUsd(result.wallet_balance_usd)} available` : ""}
+                      </span>
+                    ))}
                   </div>
-                ))}
-              </div>
-            ) : null}
-            {verification.checkedAt ? <p className="subtle">Checked at {formatTimestamp(verification.checkedAt)}</p> : null}
-          </article>
-        ) : null}
-
-        <div className="trade-credentials-grid">
-          {credentialInputs.map((item) => (
-            <article key={item.exchange} className={`overview-card compare-exchange-card ${exchangeToneClass(item.exchange)}`}>
-              <div className="overview-card-header">
-                <div><p className="eyebrow">{item.displayName}</p><strong>{paperTradingEnabled ? "Demo credentials" : item.support.live ? "Live supported" : "Paper only"}</strong></div>
-                <span className={`quality-badge quality-${paperTradingEnabled ? "neutral" : item.support.live ? "positive" : "warning"}`}>{paperTradingEnabled ? "Simulation" : item.support.live ? "Use for live" : "Preview only"}</span>
-              </div>
-              <label className="control"><span className="subtle">API key</span><input value={item.value.api_key} onChange={(event) => setCredentialValue(item.exchange, "api_key", event.target.value)} placeholder={`${item.displayName} API key`} disabled={paperTradingEnabled} /></label>
-              <label className="control"><span className="subtle">API secret</span><input type="password" value={item.value.api_secret} onChange={(event) => setCredentialValue(item.exchange, "api_secret", event.target.value)} placeholder={`${item.displayName} API secret`} disabled={paperTradingEnabled} /></label>
-              {item.exchange === "coinswitch" ? (
-                <label className="control"><span className="subtle">CoinSwitch exchange code</span><input value={item.value.extra?.exchange ?? DEFAULT_COINSWITCH_EXCHANGE} onChange={(event) => setCredentialExtra(item.exchange, "exchange", event.target.value)} placeholder={DEFAULT_COINSWITCH_EXCHANGE} disabled={paperTradingEnabled} /></label>
-              ) : null}
-              <p className="subtle trade-support-note">{paperTradingEnabled ? "Demo credentials are auto-filled only for a realistic paper simulation. No live exchange authentication is attempted." : item.support.note}</p>
-            </article>
-          ))}
+                ) : null}
+              </>
+            )}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="application/json"
+              hidden
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) void importKeysFile(file);
+                event.currentTarget.value = "";
+              }}
+            />
+          </section>
         </div>
-      </section>
 
-      {activePlan ? (
-        <section className={`panel compare-panel ${livePanelsLocked ? "trade-live-locked-panel" : ""}`}>
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">Execution Preview</p>
-              <h2>What gets sent when the trade arms</h2>
-              <div className="subtle">This preview stays visible in both paper and live mode so you can test the exact same setup before sending real orders.</div>
-            </div>
-          </div>
-          {livePanelsLocked ? <div className="trade-live-lock-overlay">Verify APIs to unlock real trade controls.</div> : null}
+        <aside className="td-side">
+          <section className="td-plan">
+            <span className="t-soft">{session && !isTerminalTradeStatus(session.status) ? "This trade" : paperTradingEnabled ? "Paper plan" : "Live plan"}</span>
+            {activePlan ? (
+              <>
+                <div className="t-bigline" style={{ marginBottom: 2 }}>
+                  <strong className={`t-num ${activePlan.expected_net_pnl_usd >= 0 ? "t-receive" : "t-pay"}`}>{money(activePlan.expected_net_pnl_usd)}</strong>
+                </div>
+                <span className="t-muted t-num">{formatPct(activePlan.expected_net_return_on_capital_percent)} of capital after fees and slippage</span>
+                <dl className="t-kv" style={{ marginTop: 12 }}>
+                  <div><dt>Funding</dt><dd className={`t-num ${activePlan.estimated_funding_pnl_usd >= 0 ? "t-receive" : "t-pay"}`}>{money(activePlan.estimated_funding_pnl_usd)}</dd></div>
+                  <div><dt>Fees</dt><dd className="t-num t-pay">{money(-activePlan.estimated_total_fees_usd)}</dd></div>
+                  <div><dt>Slippage</dt><dd className="t-num t-pay">{money(-activePlan.estimated_total_slippage_usd)}</dd></div>
+                  <div><dt>Capital used</dt><dd className="t-num">{formatUsd(activePlan.capital_required_usd)}</dd></div>
+                  <div><dt title="Not a cost: cash to keep aside in case the two legs' prices drift apart">Keep aside for price gaps</dt><dd className="t-num t-muted">{formatUsd(activePlan.estimated_basis_risk_reserve_usd)}</dd></div>
+                </dl>
+              </>
+            ) : (
+              <p className="t-muted">{planLoading ? "Calculating…" : "No plan yet."}</p>
+            )}
 
-          <div className="execution-outcome-grid">
-            <article className="overview-card execution-outcome-card execution-outcome-card-active">
-              <div className="overview-card-header">
-                <div><p className="eyebrow">{paperTradingEnabled ? "Projected paper result" : "Projected result"}</p><strong>{formatUsd(activePlan.expected_net_pnl_usd)}</strong></div>
-                <span className={activePlan.expected_net_pnl_usd >= 0 ? "phase-pill" : "overview-badge negative-badge"}>{formatPct(activePlan.expected_net_return_on_capital_percent)}</span>
+            {session && !isTerminalTradeStatus(session.status) ? (
+              <div className="t-actions">
+                <button type="button" className="t-btn" onClick={() => void cancelSession(session.id)} disabled={sessionLoading || !sessionCanCancel}>
+                  Cancel trade
+                </button>
+                <span className="t-muted" style={{ fontSize: 13 }}>{cancelTradeNote}</span>
               </div>
-              <div className="detail-grid compare-detail-grid">
-                <div><span className="subtle">Long exchange/order</span><strong>{activePlan.long_leg.display_name} | {activePlan.long_leg.side.toUpperCase()}</strong></div>
-                <div><span className="subtle">Short exchange/order</span><strong>{activePlan.short_leg.display_name} | {activePlan.short_leg.side.toUpperCase()}</strong></div>
-                <div><span className="subtle">Estimated fees</span><strong>{formatUsd(activePlan.estimated_total_fees_usd)}</strong></div>
-                <div><span className="subtle">Expected funding capture</span><strong>{formatUsd(activePlan.estimated_funding_pnl_usd)}</strong></div>
-              </div>
-            </article>
-            <article className="overview-card execution-outcome-card">
-              <div className="overview-card-header">
-                <div><p className="eyebrow">Risk warnings</p><strong>Review before arming</strong></div>
-              </div>
-              <ul className="warning-list compare-warning-list">
-                {[...activePlan.warnings, ...(longSupport?.note ? [longSupport.note] : []), ...(shortSupport?.note ? [shortSupport.note] : [])].map((warning) => (
-                  <li key={warning}>{warning}</li>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="td-arm"
+                  data-live={!paperTradingEnabled}
+                  onClick={() => void armTrade()}
+                  disabled={sessionLoading || !activePlan || (!paperTradingEnabled && (!liveModeAvailable || !liveVerificationPassed))}
+                >
+                  {sessionLoading ? "Arming…" : paperTradingEnabled ? "Arm paper trade" : "Arm live trade"}
+                </button>
+                {liveArmBlockedReason ? <p className="t-pay" style={{ fontSize: 13, margin: "8px 0 0" }}>{liveArmBlockedReason}</p> : null}
+              </>
+            )}
+
+            {activePlan?.warnings.length ? (
+              <ul className="t-checks td-warnings">
+                {activePlan.warnings.map((warning) => (
+                  <li key={warning} className="t-check" data-status="warn">
+                    <span aria-hidden="true">!</span>
+                    <span>{warning}</span>
+                  </li>
                 ))}
               </ul>
-            </article>
-          </div>
-
-          <div className="button-row">
-            <button
-              type="button"
-              className="action-button"
-              onClick={() => void armTrade()}
-              disabled={sessionLoading || !activePlan || (!paperTradingEnabled && (!liveModeAvailable || !liveVerificationPassed))}
-            >
-              {paperTradingEnabled ? "Arm paper trade" : "Arm live trade"}
-            </button>
-          </div>
-          {liveArmBlockedReason ? <p className="subtle trade-inline-note">{liveArmBlockedReason}</p> : null}
-        </section>
-      ) : null}
-
-      <section className={`panel compare-panel ${livePanelsLocked ? "trade-live-locked-panel" : ""}`}>
-        <div className="panel-header">
-          <div>
-            <p className="eyebrow">Trade Session</p>
-            <h2>{session ? "Live session status" : "No armed session yet"}</h2>
-            <div className="subtle">Once armed, the backend waits for the entry window, places both legs, and exits after the configured funding delay.</div>
-          </div>
-          {session ? <div className="panel-note">{session.current_phase}</div> : null}
-        </div>
-        {livePanelsLocked ? <div className="trade-live-lock-overlay">Verify APIs to unlock real trade controls.</div> : null}
-
-        {session ? (
-          <>
-            <div className="summary-grid compare-summary-grid">
-              <article className="summary-card"><span className="subtle">Status</span><strong>{session.status}</strong></article>
-              <article className="summary-card"><span className="subtle">Entry window</span><strong>{formatCountdown(session.scheduled_entry_at, nowTimestamp)}</strong></article>
-              <article className="summary-card"><span className="subtle">Exit window</span><strong>{formatCountdown(session.scheduled_exit_at, nowTimestamp)}</strong></article>
-              <article className="summary-card"><span className="subtle">{session.realized_net_pnl_usd == null ? "Projected net" : "Realized net"}</span><strong>{formatUsd(session.realized_net_pnl_usd ?? session.expected_net_pnl_usd)}</strong></article>
-            </div>
-
-            <div className="trade-plan-grid">
-              {[session.long_leg, session.short_leg].map((leg) => (
-                <article key={`${leg.exchange}-${leg.exchange_symbol}`} className={`overview-card compare-exchange-card ${exchangeToneClass(leg.exchange)}`}>
-                  <div className="overview-card-header">
-                    <div><p className="eyebrow">{leg.side === "buy" ? "Long leg" : "Short leg"}</p><strong>{leg.display_name}</strong></div>
-                    <span className={`quality-badge quality-${leg.status === "failed" ? "danger" : leg.status === "closed" ? "positive" : "neutral"}`}>{leg.status}</span>
-                  </div>
-                  <div className="detail-grid compare-detail-grid">
-                    <div><span className="subtle">Entry order id</span><strong>{leg.entry_order_id ?? "pending"}</strong></div>
-                    <div><span className="subtle">Exit order id</span><strong>{leg.exit_order_id ?? "pending"}</strong></div>
-                    <div><span className="subtle">Entry fill</span><strong>{formatUsd(leg.entry_fill_price)}</strong></div>
-                    <div><span className="subtle">Exit fill</span><strong>{formatUsd(leg.exit_fill_price)}</strong></div>
-                  </div>
-                </article>
-              ))}
-            </div>
-
-            <div className="button-row">
-              <button type="button" className="action-button secondary-button" onClick={() => void cancelSession(session.id)} disabled={sessionLoading || !sessionCanCancel}>Cancel session</button>
-              {isTerminalTradeStatus(session.status) ? (
-                <button type="button" className="action-button secondary-button" onClick={() => exportTradePdf(session)}>
-                  Export PDF
-                </button>
-              ) : null}
-            </div>
-            <p className="subtle trade-inline-note">{cancelTradeNote}</p>
-
-            <div className="recent-alert-list">
-              {session.events.map((event) => (
-                <div key={`${event.at}-${event.phase}-${event.message}`} className="alert-log-item">
-                  <div className="alert-item-top"><strong>{event.phase}</strong><span>{formatTimestamp(event.at)}</span></div>
-                  <div className="subtle">{event.message}</div>
-                </div>
-              ))}
-            </div>
-
-            {session.realized_net_pnl_usd != null ? (
-              <div className="summary-grid compare-summary-grid trade-realized-grid">
-                <article className="summary-card"><span className="subtle">Price PnL</span><strong>{formatUsd(session.realized_price_pnl_usd)}</strong></article>
-                <article className="summary-card"><span className="subtle">Funding captured</span><strong>{formatUsd(session.realized_funding_pnl_usd)}</strong></article>
-                <article className="summary-card"><span className="subtle">Total fees</span><strong>{formatUsd(session.realized_total_fees_usd)}</strong></article>
-                <article className="summary-card"><span className="subtle">Net result</span><strong>{formatUsd(session.realized_net_pnl_usd)}</strong></article>
-              </div>
             ) : null}
-          </>
-        ) : (
-          <div className="empty-state">
-            <p>No trade is armed yet.</p>
-            <span>Set the scenario, choose paper or live, then arm the schedule from the execution preview above.</span>
-          </div>
-        )}
-      </section>
+          </section>
 
-      {completedSession ? (
-        <section className={`panel compare-panel trade-report-panel ${livePanelsLocked ? "trade-live-locked-panel" : ""}`}>
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">Completed Trade Summary</p>
-              <h2>Full post-trade report</h2>
-              <div className="subtle">This report keeps the full event timeline, both legs, realized result, and the exact trade context so you can review what happened end to end.</div>
-            </div>
-            <div className="button-row trade-session-actions">
-              <button type="button" className="action-button secondary-button" onClick={() => setSelectedReportId(completedSession.id)}>
-                Open full summary
-              </button>
-              <button type="button" className="action-button secondary-button" onClick={() => exportTradePdf(completedSession)}>
-                Export PDF
-              </button>
-            </div>
-          </div>
-          {livePanelsLocked ? <div className="trade-live-lock-overlay">Verify APIs to unlock real trade controls.</div> : null}
-          <TradeReportContent session={completedSession} nowTimestamp={nowTimestamp} />
-        </section>
-      ) : null}
-
-      <section className={`panel compare-panel ${livePanelsLocked ? "trade-live-locked-panel" : ""}`}>
-        <div className="panel-header">
-          <div>
-            <p className="eyebrow">Local Trade History</p>
-            <h2>Saved only in this browser</h2>
-            <div className="subtle">Trade history stays in local browser storage for this device. It is not written to our server database.</div>
-          </div>
-          {localTradeHistory.length ? (
-            <button type="button" className="action-button secondary-button" onClick={clearHistory}>
-              Clear local history
-            </button>
+          {session ? (
+            <section className="t-panel td-session">
+              <h3>
+                {isTerminalTradeStatus(session.status) ? "Last trade" : "Running trade"}
+                <span className={session.status === "failed" ? "t-pay" : session.status === "completed" ? "t-receive" : "t-soft"} style={{ fontSize: 13 }}>{session.status}</span>
+              </h3>
+              <ol className="td-log">
+                {session.events.slice(-6).map((event) => (
+                  <li key={`${event.at}-${event.phase}-${event.message}`} data-level={event.level}>
+                    <span className="t-num t-muted">{new Date(event.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>
+                    <span>{event.message}</span>
+                  </li>
+                ))}
+              </ol>
+              <div className="t-actions">
+                <button type="button" className="t-btn" onClick={() => setSelectedReportId(session.id)}>Full report</button>
+                {isTerminalTradeStatus(session.status) ? <button type="button" className="t-btn" onClick={() => exportTradePdf(session)}>Export PDF</button> : null}
+              </div>
+            </section>
           ) : null}
-        </div>
-        {livePanelsLocked ? <div className="trade-live-lock-overlay">Verify APIs to unlock real trade controls.</div> : null}
+        </aside>
+      </div>
 
+      <section className="t-panel td-section td-history">
+        <h3>
+          {symbolBase} trades on this device
+          <span style={{ display: "flex", gap: 8 }}>
+            <a className="t-text-btn" style={{ height: 32, display: "inline-flex", alignItems: "center", textDecoration: "none" }} href="/performance">All results</a>
+            {localTradeHistory.length ? <button type="button" className="t-text-btn" style={{ height: 32 }} onClick={clearHistory}>Clear</button> : null}
+          </span>
+        </h3>
         {localTradeHistory.length ? (
-          <div className="recent-alert-list">
+          <ul className="t-list">
             {localTradeHistory.map((item) => (
-              <article key={item.id} className="alert-log-item trade-history-item">
-                <div className="alert-item-top">
-                  <div>
-                    <strong>{item.scenario === "best" ? "Best setup" : "Reverse setup"}</strong>
-                    <div className="subtle">{item.mode === "paper" ? "Paper" : "Live"} | {item.status}</div>
-                  </div>
-                  <span>{formatTimestamp(item.updated_at)}</span>
-                </div>
-                <div className="trade-history-metrics">
-                  <div><span className="subtle">Capital</span><strong>{formatUsd(item.capital_input_usd)}</strong></div>
-                  <div><span className="subtle">Leverage</span><strong>{item.leverage.toFixed(2)}x</strong></div>
-                  <div><span className="subtle">{item.realized_net_pnl_usd == null ? "Projected net" : "Realized net"}</span><strong>{formatUsd(item.realized_net_pnl_usd ?? item.expected_net_pnl_usd)}</strong></div>
-                  <div><span className="subtle">Entry window</span><strong>{item.scheduled_entry_at ? formatTimestamp(item.scheduled_entry_at) : "n/a"}</strong></div>
-                </div>
-                <div className="button-row trade-history-actions">
-                  <button type="button" className="action-button secondary-button" onClick={() => setSelectedReportId(item.id)}>
-                    View full summary
-                  </button>
-                  <button type="button" className="action-button secondary-button" onClick={() => exportTradePdf(item)}>
-                    Export PDF
-                  </button>
-                </div>
-              </article>
+              <li key={item.id}>
+                <button type="button" className="t-list-row" onClick={() => setSelectedReportId(item.id)} style={{ padding: 0, border: 0 }}>
+                  <span>
+                    {new Date(item.created_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}{" "}
+                    <span className="t-muted">
+                      {item.mode}, {item.strategy === "capture" ? "next funding" : "hold"}, {item.status}
+                    </span>
+                  </span>
+                  <span className={`t-num ${(item.realized_net_pnl_usd ?? item.expected_net_pnl_usd) >= 0 ? "t-receive" : "t-pay"}`}>
+                    {money(item.realized_net_pnl_usd ?? item.expected_net_pnl_usd)}
+                    {item.realized_net_pnl_usd == null ? <span className="t-muted"> planned</span> : null}
+                  </span>
+                </button>
+              </li>
             ))}
-          </div>
+          </ul>
         ) : (
-          <div className="empty-state">
-            <p>No local trade history yet.</p>
-            <span>Once you arm a paper or live trade, the session log and outcome will stay in this browser for quick review.</span>
-          </div>
+          <p className="t-muted" style={{ margin: 0 }}>No trades for this coin yet. Arm a paper trade to see how it would have gone.</p>
         )}
       </section>
+
+      {activePlan && !(session && !isTerminalTradeStatus(session.status)) ? (
+        <div className="td-mobile-arm">
+          <span>
+            <span className="t-muted">Planned</span>{" "}
+            <b className={`t-num ${activePlan.expected_net_pnl_usd >= 0 ? "t-receive" : "t-pay"}`}>{money(activePlan.expected_net_pnl_usd)}</b>
+          </span>
+          <button
+            type="button"
+            className="td-arm"
+            data-live={!paperTradingEnabled}
+            onClick={() => void armTrade()}
+            disabled={sessionLoading || (!paperTradingEnabled && (!liveModeAvailable || !liveVerificationPassed))}
+          >
+            {paperTradingEnabled ? "Arm paper" : "Arm live"}
+          </button>
+        </div>
+      ) : null}
 
       {isPaperGuideOpen ? (
-        <div className="modal-backdrop" onClick={closePaperGuide}>
-          <aside className="inspector-modal paper-guide-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
-            <div className="inspector-header">
-              <div>
-                <p className="eyebrow">Paper Trading Guide</p>
-                <h3>How this futures simulation works</h3>
-                <p className="subtle">This overlay appears when paper trading is enabled so the user understands exactly what is simulated and what is still real market data.</p>
-              </div>
-              <button type="button" className="close-button" onClick={closePaperGuide}>
-                Close
-              </button>
-            </div>
-
-            <div className="trade-guide-grid">
-              <article className="overview-card">
-                <div className="overview-card-header"><strong>What is real</strong></div>
-                <ul className="warning-list">
-                  <li>Funding rates, exchange scope, timing, quantity estimates, fees, and leverage checks come from the live market feed.</li>
-                  <li>The same symbol, best setup, reverse setup, and scheduling logic are used in both paper and live mode.</li>
-                  <li>The countdown to entry and exit follows the real funding clock for the chosen pair.</li>
-                </ul>
-              </article>
-              <article className="overview-card">
-                <div className="overview-card-header"><strong>What is simulated</strong></div>
-                <ul className="warning-list">
-                  <li>Demo credentials are auto-filled locally so the workflow feels like a real execution path without touching exchange accounts.</li>
-                  <li>Entry and exit orders are marked as filled at the planned reference prices.</li>
-                  <li>No real balance, position, or API authentication is used in paper mode.</li>
-                </ul>
-              </article>
-              <article className="overview-card">
-                <div className="overview-card-header"><strong>Futures caution</strong></div>
-                <ul className="warning-list">
-                  <li>Leverage increases liquidation risk even when the funding spread looks attractive.</li>
-                  <li>One-leg fill risk, fee drag, venue limits, and slippage can change the real result versus the model.</li>
-                  <li>Use paper mode first, then switch off the toggle only when you are comfortable with the same exact setup.</li>
-                </ul>
-              </article>
-            </div>
-
-            <div className="button-row">
-              <button type="button" className="action-button" onClick={closePaperGuide}>
-                Continue in paper mode
-              </button>
-            </div>
-          </aside>
-        </div>
+        <Dialog title="How paper trading works" onClose={closePaperGuide}>
+          <div className="td-guide">
+            <p><strong>Real:</strong> funding rates, settlement times, fees, and fills. Each leg fills against the live order book at the actual entry and exit seconds for your size, and refuses to fill if the book is too thin.</p>
+            <p><strong>Then corrected:</strong> after the settlement, the predicted funding is replaced by the rate the exchange actually settled (Binance and Delta exact; WazirX and CoinSwitch estimated).</p>
+            <p><strong>Simulated:</strong> no orders reach the exchanges and no balance is used. Real fills can still differ through latency and partial fills.</p>
+          </div>
+          <div className="t-actions">
+            <button type="button" className="t-btn" data-primary="true" onClick={closePaperGuide}>Continue in paper mode</button>
+          </div>
+        </Dialog>
       ) : null}
 
       {selectedReportSession ? (
-        <div className="modal-backdrop" onClick={() => setSelectedReportId(null)}>
-          <aside className="inspector-modal trade-summary-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
-            <div className="inspector-header">
-              <div>
-                <p className="eyebrow">Trade Summary</p>
-                <h3>{selectedReportSession.canonical_symbol}</h3>
-                <p className="subtle">Full local report for this {selectedReportSession.mode} {selectedReportSession.scenario === "best" ? "best-setup" : "reverse-setup"} trade, including every event recorded during the session.</p>
-              </div>
-              <div className="button-row trade-session-actions">
-                <button type="button" className="action-button secondary-button" onClick={() => exportTradePdf(selectedReportSession)}>
-                  Export PDF
-                </button>
-                <button type="button" className="close-button" onClick={() => setSelectedReportId(null)}>
-                  Close
-                </button>
-              </div>
-            </div>
-            <TradeReportContent session={selectedReportSession} nowTimestamp={nowTimestamp} />
-          </aside>
-        </div>
+        <Dialog wide title={`${selectedReportSession.canonical_symbol.split("-")[0]} trade report`} onClose={() => setSelectedReportId(null)}>
+          <TradeReportContent session={selectedReportSession} nowTimestamp={nowTimestamp} />
+          <div className="t-actions">
+            <button type="button" className="t-btn" onClick={() => exportTradePdf(selectedReportSession)}>Export PDF</button>
+          </div>
+        </Dialog>
       ) : null}
     </main>
   );

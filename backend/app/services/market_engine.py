@@ -13,11 +13,14 @@ from app.adapters.binance import BinanceAdapter
 from app.adapters.coindcx import CoinDCXAdapter
 from app.adapters.coinswitch import CoinSwitchAdapter
 from app.adapters.delta import DeltaAdapter
+from app.adapters.wazirx import WazirXAdapter
 from app.core.config import Settings
 from app.models.market import ExchangeStatus
 from app.services.arbitrage import build_opportunities
 from app.services.history_store import HistoryStore
 from app.services.links import exchange_display_name
+from app.services.credentials import BinanceAccountProbe, CredentialStore
+from app.services.liquidity import LiquidityService, RankingContext, SpreadTracker, enabled_exchange_names
 from app.services.market_store import MarketStore
 from app.services.telegram_notifier import TelegramNotifier
 
@@ -33,6 +36,25 @@ class MarketEngine:
         self.telegram_notifier = TelegramNotifier(self.client, settings, history_store)
         self.adapters: list[ExchangeAdapter] = []
         self.tasks: list[asyncio.Task[None]] = []
+        # Bumped after every successful poll; the dashboard stream tells clients to refetch when it changes.
+        self.data_version = 0
+        self._data_changed = asyncio.Event()
+        self._last_history_save: datetime | None = None
+        self._last_snapshot_save: datetime | None = None
+        self.ranking_context = RankingContext(
+            liquidity=LiquidityService(
+                self.client,
+                notional_usd=settings.liquidity_reference_notional_usd,
+                top_n=settings.liquidity_top_n,
+                max_age_seconds=settings.liquidity_max_age_seconds,
+            ),
+            spreads=SpreadTracker(),
+        )
+        self.telegram_notifier.command_service.ranking_context = self.ranking_context
+        self.credential_store = CredentialStore(settings.database_file, settings.credentials_encryption_key)
+        self._binance_probe = BinanceAccountProbe(self.client)
+        self._coinswitch_task: asyncio.Task[None] | None = None
+        self._coinswitch_adapter: CoinSwitchAdapter | None = None
         self._metrics: dict[str, dict[str, int | float | str | None]] = {
             "adapters": {},
             "retention": {
@@ -62,6 +84,8 @@ class MarketEngine:
             self.adapters.append(CoinDCXAdapter(self.client, settings))
         if settings.coinswitch_enabled and settings.coinswitch_configured:
             self.adapters.append(CoinSwitchAdapter(self.client, settings))
+        if settings.wazirx_enabled:
+            self.adapters.append(WazirXAdapter(self.client, settings))
 
     async def start(self) -> None:
         await self._seed_statuses()
@@ -69,6 +93,112 @@ class MarketEngine:
             self.tasks.append(asyncio.create_task(self._run_adapter(adapter), name=f"{adapter.exchange}-poller"))
         if self.settings.telegram_enabled and self.settings.telegram_bot_token:
             self.tasks.append(asyncio.create_task(self._run_telegram_bot(), name="telegram-bot-poller"))
+        self.tasks.append(asyncio.create_task(self._run_liquidity(), name="liquidity-sampler"))
+        for exchange in ("binance", "coinswitch"):
+            try:
+                await self.apply_credentials(exchange)
+            except Exception:  # pragma: no cover
+                logger.exception("Applying stored %s credentials failed", exchange)
+
+    def _signal_data_changed(self) -> None:
+        self.data_version += 1
+        self._data_changed.set()
+        self._data_changed = asyncio.Event()
+
+    async def wait_for_change(self, known_version: int, timeout: float) -> int:
+        if self.data_version != known_version:
+            return self.data_version
+        event = self._data_changed
+        try:
+            await asyncio.wait_for(event.wait(), timeout=timeout)
+        except asyncio.TimeoutError:
+            pass
+        return self.data_version
+
+    async def _save_history_if_due(self, snapshots, opportunities) -> None:
+        # Feeds the per-pair history charts and funding trends (previously never written).
+        now = datetime.now(timezone.utc)
+        try:
+            if self._last_history_save is None or (now - self._last_history_save).total_seconds() >= 60:
+                self._last_history_save = now
+                await self.history_store.save_opportunities(opportunities)
+            if self._last_snapshot_save is None or (now - self._last_snapshot_save).total_seconds() >= 300:
+                self._last_snapshot_save = now
+                await self.history_store.save_snapshots(snapshots)
+        except Exception:  # pragma: no cover
+            logger.exception("Saving history failed")
+
+    def enabled_exchange_names(self) -> list[str]:
+        return enabled_exchange_names(self.settings, self.ranking_context)
+
+    async def apply_credentials(self, exchange: str) -> dict:
+        """Load the stored key for `exchange`, verify it and put it to work. Returns the verification outcome."""
+        credential = await self.credential_store.get(exchange)
+        if exchange == "binance":
+            if credential is None:
+                self.ranking_context.taker_fee_overrides_bps.pop("binance", None)
+                return {"status": "not_configured", "message": "No key stored; Binance's default 0.05% taker fee is used."}
+            try:
+                status, message, details = await self._binance_probe.probe(credential)
+                self.ranking_context.taker_fee_overrides_bps["binance"] = float(details["taker_fee_bps"])
+            except Exception as exc:
+                self.ranking_context.taker_fee_overrides_bps.pop("binance", None)
+                status, message, details = "error", f"{exc}. Falling back to the default fee.", {}
+            await self.credential_store.record_verification(exchange, status, message, details)
+            return {"status": status, "message": message, "details": details}
+
+        if exchange == "coinswitch":
+            await self._stop_coinswitch()
+            if credential is None:
+                self.ranking_context.runtime_exchanges.discard("coinswitch")
+                return {"status": "not_configured", "message": "No key stored; CoinSwitch is not monitored."}
+            adapter = CoinSwitchAdapter(
+                self.client,
+                self.settings,
+                api_key=credential.api_key,
+                secret_key=credential.api_secret,
+                exchange_code=credential.extra.get("exchange") or self.settings.coinswitch_exchange,
+            )
+            try:
+                snapshots = await adapter.fetch_snapshots()
+            except Exception as exc:
+                message = f"CoinSwitch rejected the key or returned no data: {exc}"
+                await self.credential_store.record_verification(exchange, "error", message, {})
+                await self.store.mark_error("coinswitch", "CoinSwitch", message, configured=False)
+                return {"status": "error", "message": message}
+            await self.store.update_exchange("coinswitch", "CoinSwitch", snapshots)
+            self._coinswitch_adapter = adapter
+            self.ranking_context.runtime_exchanges.add("coinswitch")
+            self._coinswitch_task = asyncio.create_task(self._run_adapter(adapter), name="coinswitch-poller")
+            message = f"Verified: {len(snapshots)} CoinSwitch perpetuals are now monitored."
+            await self.credential_store.record_verification(exchange, "verified", message, {"symbols": len(snapshots)})
+            return {"status": "verified", "message": message}
+
+        return {"status": "not_supported", "message": "This exchange does not need API keys."}
+
+    async def _stop_coinswitch(self) -> None:
+        if self._coinswitch_task and not self._coinswitch_task.done():
+            self._coinswitch_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._coinswitch_task
+        self._coinswitch_task = None
+        self._coinswitch_adapter = None
+
+    async def build_opportunities(self, snapshots=None):
+        snapshots = snapshots if snapshots is not None else await self.store.get_snapshots()
+        return build_opportunities(snapshots, self.settings, self.ranking_context)
+
+    async def _run_liquidity(self) -> None:
+        # Sample order books for the strongest pairs; separate from feed polling so a slow book never delays rates.
+        await asyncio.sleep(5)
+        while True:
+            try:
+                opportunities = await self.build_opportunities()
+                measured = await self.ranking_context.liquidity.refresh(opportunities)  # type: ignore[union-attr]
+                logger.info("Sampled %s order books for liquidity", measured)
+            except Exception:  # pragma: no cover
+                logger.exception("Liquidity sampling failed")
+            await asyncio.sleep(max(15.0, self.settings.liquidity_max_age_seconds / 3))
 
     async def stop(self) -> None:
         for task in self.tasks:
@@ -76,6 +206,10 @@ class MarketEngine:
         for task in self.tasks:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
+        for adapter in self.adapters:
+            with contextlib.suppress(Exception):
+                await adapter.close()
+        await self._stop_coinswitch()
         await self.client.aclose()
 
     def metrics(self) -> dict[str, object]:
@@ -98,10 +232,14 @@ class MarketEngine:
                 snapshots = await adapter.fetch_snapshots()
                 await self.store.update_exchange(adapter.exchange, adapter.display_name, snapshots)
                 all_snapshots = await self.store.get_snapshots()
-                opportunities = build_opportunities(all_snapshots, self.settings)
+                opportunities = build_opportunities(all_snapshots, self.settings, self.ranking_context)
+                self.ranking_context.spreads.record(opportunities)  # type: ignore[union-attr]
+                await self._save_history_if_due(all_snapshots, opportunities)
+                self._signal_data_changed()
                 await self._prune_if_due()
                 await self._verify_daily_retention_cleanup()
                 await self.telegram_notifier.notify(opportunities)
+                await self.telegram_notifier.notify_captures(opportunities)
                 if await self._daily_summary_ready():
                     await self.telegram_notifier.notify_daily_summary(all_snapshots, opportunities)
                 duration_ms = (datetime.now(timezone.utc) - started_at).total_seconds() * 1000
@@ -140,7 +278,7 @@ class MarketEngine:
         while True:
             try:
                 snapshots = await self.store.get_snapshots()
-                opportunities = build_opportunities(snapshots, self.settings)
+                opportunities = build_opportunities(snapshots, self.settings, self.ranking_context)
                 result = await self.telegram_notifier.process_updates(snapshots, opportunities)
                 self._metrics["telegram"]["bot_polls"] = int(self._metrics["telegram"]["bot_polls"]) + 1
                 self._metrics["telegram"]["last_processed_updates"] = int(result.get("processed", 0))
@@ -238,6 +376,12 @@ class MarketEngine:
                 self.settings.coinswitch_configured,
                 "CoinSwitch API key and secret are required." if self.settings.coinswitch_enabled and not self.settings.coinswitch_configured else None,
             ),
+            (
+                "wazirx",
+                self.settings.wazirx_enabled,
+                True,
+                None,
+            ),
         ]
 
         for exchange, enabled, configured, error_message in status_definitions:
@@ -255,7 +399,7 @@ class MarketEngine:
 
     async def _daily_summary_ready(self) -> bool:
         statuses = await self.store.get_statuses()
-        expected = set(self.settings.enabled_exchange_names)
+        expected = set(self.enabled_exchange_names())
         healthy = {
             status.exchange
             for status in statuses

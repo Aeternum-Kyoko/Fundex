@@ -8,6 +8,7 @@ DISPLAY_NAMES: dict[ExchangeName, str] = {
     "delta": "Delta Exchange India",
     "coindcx": "CoinDCX",
     "coinswitch": "CoinSwitch",
+    "wazirx": "WazirX",
 }
 
 
@@ -30,4 +31,6 @@ def exchange_trade_url(exchange: ExchangeName, exchange_symbol: str) -> str:
         return "https://coindcx.com/crypto-futures/"
     if exchange == "coinswitch":
         return f"https://coinswitch.co/pro/futures-perpetual/{symbol}"
+    if exchange == "wazirx":
+        return "https://wazirx.com/futures"
     return "#"

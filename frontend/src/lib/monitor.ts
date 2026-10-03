@@ -14,18 +14,18 @@ export function formatPct(value: number, digits = 2) {
   return `${value.toFixed(digits)}%`;
 }
 
-export function formatFundingRate(value: number | null | undefined, digits = 3) {
+export function formatFundingRate(value: number | null | undefined, digits = 4) {
   if (value == null) {
     return "n/a";
   }
-  if (Math.abs(value) < 0.000005) {
+  if (Math.abs(value) < 0.0000005) {
     return "flat";
   }
   return formatPct(value * 100, digits);
 }
 
-export function formatUsd(value: number | null) {
-  if (!value) {
+export function formatUsd(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) {
     return "n/a";
   }
 
@@ -35,6 +35,39 @@ export function formatUsd(value: number | null) {
     notation: value >= 1_000_000 ? "compact" : "standard",
     maximumFractionDigits: 2,
   }).format(value);
+}
+
+export function formatPrice(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value) || value <= 0) {
+    return "n/a";
+  }
+  // Keep at least 4 significant digits so sub-cent contracts are not rounded to $0.00.
+  const digits = value >= 1000 ? 2 : value >= 1 ? 4 : Math.min(10, Math.max(4, 3 - Math.floor(Math.log10(value)) + 1));
+  return `$${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: digits })}`;
+}
+
+export function formatHours(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) {
+    return "never (30d+)";
+  }
+  if (value < 1) {
+    return `${Math.max(1, Math.round(value * 60))}m`;
+  }
+  if (value < 48) {
+    return `${value.toFixed(value < 10 ? 1 : 0)}h`;
+  }
+  return `${(value / 24).toFixed(1)}d`;
+}
+
+export function horizonLabel(hours: number | null | undefined) {
+  if (!hours) {
+    return "hold";
+  }
+  return hours % 24 === 0 ? `${hours / 24}d` : `${hours}h`;
+}
+
+export function legInterval(leg: { funding_interval_hours?: number | null }, fallback: number) {
+  return leg.funding_interval_hours ?? fallback;
 }
 
 export function getNextFundingTime(opportunity: ArbitrageOpportunity): string | null {
@@ -92,9 +125,18 @@ export function buildOpportunityCsv(opportunities: ArbitrageOpportunity[]) {
     base_asset: opportunity.base_asset,
     lower_funding_exchange: opportunity.long_leg.display_name,
     higher_funding_exchange: opportunity.short_leg.display_name,
-    spread_percent: (opportunity.spread_rate * 100).toFixed(3),
-    net_apr_percent: opportunity.net_apr_percent.toFixed(2),
+    long_funding_rate_percent: (opportunity.long_leg.funding_rate * 100).toFixed(5),
+    long_interval_hours: legInterval(opportunity.long_leg, opportunity.funding_interval_hours),
+    short_funding_rate_percent: (opportunity.short_leg.funding_rate * 100).toFixed(5),
+    short_interval_hours: legInterval(opportunity.short_leg, opportunity.funding_interval_hours),
+    spread_per_8h_percent: (opportunity.spread_rate * 100).toFixed(5),
     gross_apr_percent: opportunity.gross_apr_percent.toFixed(2),
+    total_cost_percent: opportunity.estimated_total_cost_percent.toFixed(4),
+    holding_horizon_hours: opportunity.holding_horizon_hours,
+    expected_funding_percent: opportunity.expected_funding_percent.toFixed(4),
+    net_return_percent: opportunity.net_return_percent.toFixed(4),
+    net_apr_percent: opportunity.net_apr_percent.toFixed(2),
+    break_even_hours: opportunity.break_even_hours?.toFixed(2) ?? "",
     confidence_score: (opportunity.confidence_score * 100).toFixed(0),
     next_funding_time: getNextFundingTime(opportunity) ?? "",
     combined_open_interest_usd: opportunity.combined_open_interest_usd ?? "",
@@ -123,6 +165,8 @@ export function exchangeToneClass(exchange: ExchangeName) {
       return "exchange-coindcx";
     case "coinswitch":
       return "exchange-coinswitch";
+    case "wazirx":
+      return "exchange-wazirx";
     default:
       return "";
   }
@@ -138,6 +182,8 @@ export function exchangeLabel(exchange: ExchangeName) {
       return "CoinDCX";
     case "coinswitch":
       return "CoinSwitch";
+    case "wazirx":
+      return "WazirX";
     default:
       return exchange;
   }
@@ -157,25 +203,20 @@ export function formatLeverage(value: number | null | undefined) {
   return `${Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1)}x`;
 }
 
+const TRUST_TONE: Record<string, "positive" | "warning" | "danger"> = { high: "positive", medium: "warning", low: "danger" };
+
+/** Badges come from the backend's trust checks so every screen agrees on the same thresholds. */
 export function qualityBadges(opportunity: ArbitrageOpportunity) {
-  const badges: Array<{ label: string; tone: "positive" | "warning" | "danger" | "neutral" }> = [];
-
-  if (opportunity.confidence_score >= 0.82 && (opportunity.combined_open_interest_usd ?? 0) >= 2_000_000) {
-    badges.push({ label: "Strong", tone: "positive" });
+  const badges: Array<{ label: string; tone: "positive" | "warning" | "danger" | "neutral" }> = [getOpportunityTrustBadge(opportunity)];
+  if (opportunity.slippage_source === "orderbook") {
+    badges.push({ label: "Books measured", tone: "positive" });
+  } else {
+    badges.push({ label: "Est. slippage", tone: "neutral" });
   }
-  if ((opportunity.combined_open_interest_usd ?? 0) < 1_000_000) {
-    badges.push({ label: "Low OI", tone: "warning" });
+  const failing = opportunity.trust_checks.find((check) => check.status === "fail");
+  if (failing) {
+    badges.push({ label: failing.label, tone: "danger" });
   }
-  if ((opportunity.max_leg_age_seconds ?? 999) > 30) {
-    badges.push({ label: "Stale", tone: "danger" });
-  }
-  if (Math.abs(opportunity.spread_rate) >= 0.0035) {
-    badges.push({ label: "High spread", tone: "neutral" });
-  }
-  if (!badges.length) {
-    badges.push({ label: "Live", tone: "neutral" });
-  }
-
   return badges.slice(0, 3);
 }
 
@@ -291,14 +332,6 @@ export function getExchangeCapabilityBadges(exchange: SymbolComparisonExchangeSn
 }
 
 export function getOpportunityTrustBadge(opportunity: ArbitrageOpportunity): TrustBadge {
-  if ((opportunity.max_leg_age_seconds ?? 999) > 45) {
-    return { label: "Low trust", tone: "danger" };
-  }
-  if (opportunity.confidence_score >= 0.8 && (opportunity.combined_open_interest_usd ?? 0) >= 2_000_000) {
-    return { label: "High trust", tone: "positive" };
-  }
-  if ((opportunity.combined_open_interest_usd ?? 0) < 1_000_000 || opportunity.confidence_score < 0.65) {
-    return { label: "Needs review", tone: "warning" };
-  }
-  return { label: "Good trust", tone: "neutral" };
+  const level = opportunity.trust_level ?? "medium";
+  return { label: `${level[0].toUpperCase()}${level.slice(1)} trust`, tone: TRUST_TONE[level] ?? "neutral" };
 }

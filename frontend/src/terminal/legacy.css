@@ -1,0 +1,215 @@
+/* Brings the Compare, Trade and Admin screens (older component markup) into the terminal design language.
+   Scoped under .t-app so it only applies inside the new chrome. Loaded after styles.css. */
+
+.t-app .top-nav { display: none; }
+
+.t-app.t-legacy .page {
+  width: auto;
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 24px clamp(16px, 3vw, 28px) calc(96px + var(--t-safe-b));
+}
+
+@media (min-width: 760px) {
+  .t-app.t-legacy .page { padding-bottom: 48px; }
+}
+
+/* Headings: one display face, calm sizes, no all-caps eyebrows. */
+.t-app .hero h1 {
+  font-family: var(--t-font-display);
+  font-size: clamp(30px, 4.2vw, 46px);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.02;
+}
+
+.t-app .panel h2,
+.t-app .inspector-modal h3 {
+  font-family: var(--t-font-display);
+  font-size: clamp(22px, 2.2vw, 28px);
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+.t-app .eyebrow {
+  margin: 0 0 6px;
+  color: var(--t-text-3);
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.t-app .lede { color: var(--t-text-2); max-width: 64ch; }
+
+/* Surfaces: one radius per tier, hairline borders, no glass or heavy shadows. */
+.t-app .hero-card,
+.t-app .panel,
+.t-app .status-card,
+.t-app .summary-card,
+.t-app .table-shell,
+.t-app .metric-card,
+.t-app .inspector-leg,
+.t-app .overview-card,
+.t-app .toolbar-stat,
+.t-app .chart-card {
+  border: 1px solid var(--t-line);
+  background: var(--t-bg-raised);
+  backdrop-filter: none;
+  box-shadow: none;
+  border-radius: var(--t-radius-m);
+}
+
+.t-app .hero-card,
+.t-app .control-center-card {
+  background: var(--t-surface);
+  border-radius: var(--t-radius-l);
+}
+
+.t-app .hero { gap: 20px; margin-bottom: 20px; }
+
+.t-app .summary-grid { gap: 10px; }
+
+.t-app .summary-card { padding: 14px 16px; }
+
+.t-app .summary-card strong,
+.t-app .metric-card strong {
+  font-family: var(--t-font-display);
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.t-app .summary-card span,
+.t-app .subtle,
+.t-app .panel-note { color: var(--t-text-3); }
+
+.t-app .overview-card-header { gap: 10px; }
+
+/* Buttons: amber primary, quiet secondary, matching .t-btn. */
+.t-app .action-button {
+  height: 40px;
+  padding: 0 16px;
+  border-radius: 11px;
+  border: 1px solid var(--t-amber);
+  background: var(--t-amber);
+  color: var(--t-on-amber);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.t-app .action-button:hover { background: color-mix(in srgb, var(--t-amber) 88%, white); }
+
+.t-app .action-button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.t-app .secondary-button,
+.t-app .overview-button,
+.t-app .close-button,
+.t-app .compare-link,
+.t-app .compare-button-link {
+  border: 1px solid var(--t-line-strong);
+  background: var(--t-surface);
+  color: var(--t-text);
+  border-radius: 11px;
+}
+
+.t-app .secondary-button:hover,
+.t-app .overview-button:hover,
+.t-app .close-button:hover { background: var(--t-surface-2); }
+
+.t-app .chip,
+.t-app .phase-pill {
+  background: var(--t-amber-bg);
+  color: var(--t-amber);
+  border-color: transparent;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* Inputs */
+.t-app .control input,
+.t-app .control select {
+  height: 40px;
+  border-radius: 10px;
+  border: 1px solid var(--t-line);
+  background: var(--t-surface);
+  color: var(--t-text);
+}
+
+.t-app .control input:focus,
+.t-app .control select:focus {
+  border-color: var(--t-amber);
+  box-shadow: 0 0 0 3px var(--t-amber-bg);
+}
+
+/* Banners and lists */
+.t-app .banner {
+  border-radius: 12px;
+  box-shadow: none;
+}
+
+.t-app .banner-error {
+  background: var(--t-pay-bg);
+  color: var(--t-pay);
+  border-color: transparent;
+}
+
+.t-app .empty-state { color: var(--t-text-2); }
+
+/* Tables on the trade desk landing page */
+.t-app .table-shell { background: var(--t-bg-raised); }
+
+.t-app .opportunity-table th {
+  color: var(--t-text-3);
+  font-weight: 500;
+  font-size: 13px;
+  text-transform: none;
+  letter-spacing: 0;
+  background: var(--t-bg-raised);
+}
+
+.t-app .opportunity-table td { border-color: color-mix(in srgb, var(--t-line) 60%, transparent); }
+
+.t-app .opportunity-table tbody tr:hover { background: var(--t-surface); }
+
+.t-app .positive { color: var(--t-receive); }
+.t-app .negative { color: var(--t-pay); }
+
+/* Modals (admin, overview) */
+.t-app .modal-backdrop,
+.modal-backdrop {
+  background: var(--t-scrim);
+  backdrop-filter: blur(6px);
+}
+
+.inspector-modal {
+  background: var(--t-bg-raised) !important;
+  border: 1px solid var(--t-line) !important;
+  border-radius: var(--t-radius-l) !important;
+  box-shadow: var(--t-shadow) !important;
+  color: var(--t-text);
+  font-family: var(--t-font-ui);
+}
+
+/* Navigation inside the shared page frame */
+@media (min-width: 760px) {
+  .t-nav.t-nav-always { display: flex; }
+}
+
+.t-nav-always a[aria-current="page"] { color: var(--t-text); background: var(--t-bg-raised); }
+
+@media (max-width: 759px) {
+  .t-app .hero { grid-template-columns: 1fr; }
+  .t-app .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .t-nav-always { display: none; }
+  .t-bottomnav-legacy { grid-template-columns: repeat(4, 1fr); }
+  .t-bottomnav-legacy a[aria-selected="true"] { color: var(--t-text); }
+  .t-bottomnav-legacy a[aria-selected="true"] svg { color: var(--t-amber); }
+}
+
+/* Phone: section links live in the bottom bar / menu, never in the top bar. */
+@media (max-width: 759px) {
+  .t-app .t-nav { display: none !important; }
+}

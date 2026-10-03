@@ -3,6 +3,8 @@ import { FormEvent, ReactNode, useState } from "react";
 const AUTH_SESSION_KEY = "arbradar-frontend-auth-session";
 const AUTH_USERNAME = (import.meta.env.VITE_AUTH_USERNAME as string | undefined)?.trim() ?? "";
 const AUTH_PASSWORD = (import.meta.env.VITE_AUTH_PASSWORD as string | undefined) ?? "";
+// Local-only escape hatch: ignored in production builds so a stray env var can't open the deployed dashboard.
+const AUTH_DISABLED = import.meta.env.DEV && import.meta.env.VITE_AUTH_DISABLED === "true";
 
 interface LoginGateProps {
   children: ReactNode;
@@ -26,6 +28,10 @@ export function LoginGate({ children }: LoginGateProps) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const configured = isConfigured();
+
+  if (AUTH_DISABLED) {
+    return <>{children}</>;
+  }
 
   const signOut = () => {
     window.sessionStorage.removeItem(AUTH_SESSION_KEY);
@@ -68,7 +74,7 @@ export function LoginGate({ children }: LoginGateProps) {
     <main className="auth-page">
       <section className="auth-panel">
         <div>
-          <p className="eyebrow">ArbRadar</p>
+          <p className="eyebrow">Fundex</p>
           <h1>Private access</h1>
           <p className="auth-copy">Sign in to open the live funding desk.</p>
         </div>

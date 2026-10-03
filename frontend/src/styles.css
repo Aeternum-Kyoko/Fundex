@@ -1,35 +1,39 @@
 :root {
-  color-scheme: dark;
-  --bg: #060810;
-  --bg-deep: #03050b;
-  --surface: rgba(15, 20, 31, 0.82);
-  --surface-strong: rgba(16, 22, 34, 0.94);
-  --surface-soft: rgba(24, 33, 50, 0.7);
-  --surface-elevated: rgba(21, 30, 46, 0.98);
-  --border: rgba(148, 163, 184, 0.16);
-  --border-strong: rgba(148, 163, 184, 0.24);
-  --text: #f3f7ff;
-  --muted: #96a7bf;
-  --muted-strong: #c4d1e2;
-  --accent: #87dbc6;
-  --accent-soft: rgba(126, 224, 195, 0.14);
-  --accent-2: #9dbdff;
-  --accent-2-soft: rgba(138, 180, 255, 0.16);
-  --accent-warm: #f6c57a;
-  --accent-warm-soft: rgba(255, 202, 122, 0.16);
-  --danger: #ff7d7d;
-  --danger-soft: rgba(255, 125, 125, 0.16);
-  --shadow: 0 30px 80px rgba(0, 0, 0, 0.42);
-  --shadow-soft: 0 18px 48px rgba(0, 0, 0, 0.28);
-  --binance: #f4d36a;
-  --binance-soft: rgba(244, 211, 106, 0.16);
-  --delta: #7aa7ff;
-  --delta-soft: rgba(122, 167, 255, 0.16);
-  --coindcx: #8ce6ba;
-  --coindcx-soft: rgba(140, 230, 186, 0.16);
-  --coinswitch: #ffb492;
-  --coinswitch-soft: rgba(255, 180, 146, 0.16);
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", sans-serif;
+  /* Legacy page variables now resolve to the terminal design tokens (terminal/design.css),
+     so Compare, Trade and Admin share one palette, typeface and light/dark switch. */
+  --bg: var(--t-bg);
+  --bg-deep: var(--t-bg);
+  --surface: var(--t-bg-raised);
+  --surface-strong: var(--t-bg-raised);
+  --surface-soft: var(--t-surface);
+  --surface-elevated: var(--t-surface);
+  --border: var(--t-line);
+  --border-strong: var(--t-line-strong);
+  --text: var(--t-text);
+  --muted: var(--t-text-3);
+  --muted-strong: var(--t-text-2);
+  --accent: var(--t-receive);
+  --accent-soft: var(--t-receive-bg);
+  --accent-2: var(--x-delta);
+  --accent-2-soft: color-mix(in srgb, var(--x-delta) 16%, transparent);
+  --accent-warm: var(--t-amber);
+  --accent-warm-soft: var(--t-amber-bg);
+  --danger: var(--t-pay);
+  --danger-soft: var(--t-pay-bg);
+  --shadow: var(--t-shadow);
+  --shadow-soft: var(--t-shadow);
+  --binance: var(--x-binance);
+  --binance-soft: color-mix(in srgb, var(--x-binance) 16%, transparent);
+  --delta: var(--x-delta);
+  --delta-soft: color-mix(in srgb, var(--x-delta) 16%, transparent);
+  --coindcx: var(--x-coindcx);
+  --coindcx-soft: color-mix(in srgb, var(--x-coindcx) 16%, transparent);
+  --coinswitch: var(--x-coinswitch);
+  --coinswitch-soft: color-mix(in srgb, var(--x-coinswitch) 16%, transparent);
+  --wazirx: var(--x-wazirx);
+  --wazirx-soft: color-mix(in srgb, var(--x-wazirx) 16%, transparent);
+  font-family: var(--t-font-ui);
+  font-feature-settings: "tnum" 1;
 }
 
 * {
@@ -43,11 +47,7 @@ html {
 body {
   margin: 0;
   min-width: 320px;
-  background:
-    radial-gradient(circle at top left, rgba(126, 224, 195, 0.14), transparent 24%),
-    radial-gradient(circle at 85% 10%, rgba(138, 180, 255, 0.14), transparent 28%),
-    radial-gradient(circle at bottom right, rgba(255, 202, 122, 0.1), transparent 22%),
-    linear-gradient(180deg, var(--bg) 0%, var(--bg-deep) 100%);
+  background: var(--t-bg);
   color: var(--text);
 }
 
@@ -144,7 +144,7 @@ button {
   margin-bottom: 18px;
   border: 1px solid var(--border);
   border-radius: 999px;
-  background: rgba(9, 13, 21, 0.78);
+  background: color-mix(in srgb, var(--t-bg) 86%, transparent);
   backdrop-filter: blur(24px) saturate(1.16);
   box-shadow: var(--shadow-soft);
 }
@@ -158,7 +158,7 @@ button {
 }
 
 .top-nav-link:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: color-mix(in srgb, var(--t-text) 8.0%, transparent);
   color: var(--text);
   transform: translateY(-1px);
 }
@@ -269,7 +269,7 @@ button {
 .control-center-card {
   background:
     linear-gradient(135deg, rgba(135, 219, 198, 0.08), transparent 42%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02));
+    linear-gradient(180deg, color-mix(in srgb, var(--t-text) 4.0%, transparent), color-mix(in srgb, var(--t-text) 2.0%, transparent));
 }
 
 .chip,
@@ -298,7 +298,7 @@ button {
 }
 
 .overview-badge {
-  background: rgba(255, 255, 255, 0.06);
+  background: color-mix(in srgb, var(--t-text) 6.0%, transparent);
   border-color: var(--border);
 }
 
@@ -309,7 +309,7 @@ button {
 }
 
 .table-pill {
-  background: rgba(255, 255, 255, 0.04);
+  background: color-mix(in srgb, var(--t-text) 4.0%, transparent);
   color: var(--muted);
   margin-bottom: 8px;
 }
@@ -332,6 +332,11 @@ button {
 .exchange-coinswitch {
   --exchange-color: var(--coinswitch);
   --exchange-surface: var(--coinswitch-soft);
+}
+
+.exchange-wazirx {
+  --exchange-color: var(--wazirx);
+  --exchange-surface: var(--wazirx-soft);
 }
 
 .binance-pill {
@@ -390,7 +395,7 @@ button {
   padding: 12px 16px;
   border-radius: 999px;
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.04);
+  background: color-mix(in srgb, var(--t-text) 4.0%, transparent);
   color: var(--muted-strong);
 }
 
@@ -429,6 +434,16 @@ button {
   color: var(--coinswitch);
   background: var(--coinswitch-soft);
   border-color: rgba(255, 180, 146, 0.24);
+}
+
+.exchange-scope-chip-active.exchange-wazirx,
+.exchange-inline-pill-active.exchange-wazirx,
+.table-pill.exchange-wazirx,
+.best-pair-leg.exchange-wazirx,
+.settlement-exchange-line.exchange-wazirx {
+  color: var(--wazirx);
+  background: var(--wazirx-soft);
+  border-color: rgba(196, 163, 255, 0.24);
 }
 
 .exchange-scope-chip:disabled,
@@ -519,7 +534,7 @@ button {
   padding: 10px 14px;
   border-radius: 999px;
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.04);
+  background: color-mix(in srgb, var(--t-text) 4.0%, transparent);
 }
 
 .compare-top-actions,
@@ -580,7 +595,7 @@ button {
   padding: 16px 18px;
   border: 1px solid rgba(255, 202, 122, 0.24);
   border-radius: 20px;
-  background: linear-gradient(180deg, rgba(255, 202, 122, 0.12), rgba(255, 255, 255, 0.03));
+  background: linear-gradient(180deg, rgba(255, 202, 122, 0.12), color-mix(in srgb, var(--t-text) 3.0%, transparent));
 }
 
 .execution-validation-banner strong {
@@ -698,7 +713,7 @@ button {
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
+  background: color-mix(in srgb, var(--t-text) 6.0%, transparent);
   color: var(--muted-strong);
 }
 
@@ -720,15 +735,15 @@ button {
 }
 
 .settlement-grid-scroll::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.14);
+  background: color-mix(in srgb, var(--t-text) 14.0%, transparent);
   border-radius: 999px;
 }
 
 .settlement-card {
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid color-mix(in srgb, var(--t-text) 8.0%, transparent);
   border-radius: 22px;
   padding: 16px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.03));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--t-text) 5.0%, transparent), color-mix(in srgb, var(--t-text) 3.0%, transparent));
   display: grid;
   gap: 12px;
 }
@@ -831,7 +846,7 @@ button {
   padding: 14px 16px;
   border: 1px solid var(--border);
   border-radius: 20px;
-  background: rgba(255, 255, 255, 0.04);
+  background: color-mix(in srgb, var(--t-text) 4.0%, transparent);
 }
 
 .trade-mode-toggle input {
@@ -973,7 +988,7 @@ button {
 .compare-exchange-card {
   padding: 22px;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02)),
+    linear-gradient(180deg, color-mix(in srgb, var(--t-text) 4.0%, transparent), color-mix(in srgb, var(--t-text) 2.0%, transparent)),
     var(--surface-soft);
 }
 
@@ -1058,23 +1073,23 @@ button {
   padding: 16px 18px;
   border-radius: 20px;
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.04);
+  background: color-mix(in srgb, var(--t-text) 4.0%, transparent);
   box-shadow: var(--shadow-soft);
 }
 
 .exchange-health-card.binance {
   border-color: rgba(244, 211, 106, 0.2);
-  background: linear-gradient(180deg, rgba(244, 211, 106, 0.1), rgba(255, 255, 255, 0.03));
+  background: linear-gradient(180deg, rgba(244, 211, 106, 0.1), color-mix(in srgb, var(--t-text) 3.0%, transparent));
 }
 
 .exchange-health-card.delta {
   border-color: rgba(122, 167, 255, 0.2);
-  background: linear-gradient(180deg, rgba(122, 167, 255, 0.1), rgba(255, 255, 255, 0.03));
+  background: linear-gradient(180deg, rgba(122, 167, 255, 0.1), color-mix(in srgb, var(--t-text) 3.0%, transparent));
 }
 
 .exchange-health-card.coindcx {
   border-color: rgba(140, 230, 186, 0.2);
-  background: linear-gradient(180deg, rgba(140, 230, 186, 0.1), rgba(255, 255, 255, 0.03));
+  background: linear-gradient(180deg, rgba(140, 230, 186, 0.1), color-mix(in srgb, var(--t-text) 3.0%, transparent));
 }
 
 .exchange-health-top {
@@ -1118,7 +1133,7 @@ button {
 
 .exchange-health-badge.neutral {
   color: var(--muted-strong);
-  background: rgba(255, 255, 255, 0.06);
+  background: color-mix(in srgb, var(--t-text) 6.0%, transparent);
 }
 
 .exchange-health-meta {
@@ -1146,9 +1161,10 @@ button {
 
 .funding-exchange-card.exchange-binance,
 .funding-exchange-card.exchange-delta,
-.funding-exchange-card.exchange-coindcx {
+.funding-exchange-card.exchange-coindcx,
+.funding-exchange-card.exchange-wazirx {
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02)),
+    linear-gradient(180deg, color-mix(in srgb, var(--t-text) 4.0%, transparent), color-mix(in srgb, var(--t-text) 2.0%, transparent)),
     var(--surface-strong);
   border-color: color-mix(in srgb, var(--exchange-color, var(--border)) 24%, var(--border));
 }
@@ -1304,7 +1320,7 @@ button {
 .alert-log-item {
   width: 100%;
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.04);
+  background: color-mix(in srgb, var(--t-text) 4.0%, transparent);
   border-radius: 20px;
   padding: 16px;
   text-align: left;
@@ -1314,7 +1330,7 @@ button {
 .funding-list-card {
   border: 1px solid var(--border);
   border-radius: 20px;
-  background: rgba(255, 255, 255, 0.03);
+  background: color-mix(in srgb, var(--t-text) 3.0%, transparent);
   padding: 16px;
 }
 
@@ -1327,12 +1343,12 @@ button {
 .funding-item {
   border: 1px solid var(--border);
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.04);
+  background: color-mix(in srgb, var(--t-text) 4.0%, transparent);
   padding: 14px;
 }
 
 .funding-item:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: color-mix(in srgb, var(--t-text) 8.0%, transparent);
 }
 
 .funding-item-top,
@@ -1399,12 +1415,12 @@ button {
 
 .sparkline-placeholder {
   border-radius: 999px;
-  background: linear-gradient(90deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.06));
+  background: linear-gradient(90deg, color-mix(in srgb, var(--t-text) 6.0%, transparent), color-mix(in srgb, var(--t-text) 14.0%, transparent), color-mix(in srgb, var(--t-text) 6.0%, transparent));
 }
 
 .watchlist-card:hover,
 .alert-item:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: color-mix(in srgb, var(--t-text) 8.0%, transparent);
 }
 
 .watchlist-card-top,
@@ -1428,7 +1444,7 @@ button {
   margin-top: 18px;
   border: 1px dashed var(--border);
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.03);
+  background: color-mix(in srgb, var(--t-text) 3.0%, transparent);
 }
 
 .desk-controls {
@@ -1457,7 +1473,7 @@ button {
 
 .secondary-button {
   border-color: var(--border);
-  background: rgba(255, 255, 255, 0.06);
+  background: color-mix(in srgb, var(--t-text) 6.0%, transparent);
   color: var(--muted-strong);
 }
 
@@ -1466,7 +1482,7 @@ button {
 }
 
 .secondary-button:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: color-mix(in srgb, var(--t-text) 10.0%, transparent);
 }
 
 .recent-alert-list {
@@ -1603,7 +1619,7 @@ button {
   border-radius: 999px;
   font-size: 0.72rem;
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.06);
+  background: color-mix(in srgb, var(--t-text) 6.0%, transparent);
 }
 
 .quality-positive {
@@ -1628,7 +1644,7 @@ button {
 .overview-button,
 .close-button,
 .watch-button {
-  background: rgba(255, 255, 255, 0.06);
+  background: color-mix(in srgb, var(--t-text) 6.0%, transparent);
   color: var(--muted-strong);
   border-color: var(--border);
 }
@@ -1666,7 +1682,7 @@ button {
 .overview-button:hover,
 .close-button:hover,
 .watch-button:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: color-mix(in srgb, var(--t-text) 10.0%, transparent);
 }
 
 .watch-button {
@@ -1761,7 +1777,7 @@ button {
 }
 
 .metric-card {
-  background: rgba(255, 255, 255, 0.04);
+  background: color-mix(in srgb, var(--t-text) 4.0%, transparent);
 }
 
 .metric-card strong {
@@ -1777,7 +1793,7 @@ button {
 }
 
 .overview-card {
-  background: rgba(255, 255, 255, 0.04);
+  background: color-mix(in srgb, var(--t-text) 4.0%, transparent);
 }
 
 .detail-grid {
@@ -1816,7 +1832,7 @@ button {
 .chart-card {
   margin-top: 14px;
   padding: 18px;
-  background: rgba(255, 255, 255, 0.04);
+  background: color-mix(in srgb, var(--t-text) 4.0%, transparent);
   animation: fade-in 0.24s ease;
 }
 
@@ -1831,7 +1847,7 @@ button {
   position: relative;
   overflow: hidden;
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.05);
+  background: color-mix(in srgb, var(--t-text) 5.0%, transparent);
 }
 
 .skeleton-line::after,
@@ -1841,7 +1857,7 @@ button {
   position: absolute;
   inset: 0;
   transform: translateX(-100%);
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.12), transparent);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--t-text) 12.0%, transparent), transparent);
   animation: shimmer 1.4s infinite;
 }
 
@@ -1883,7 +1899,7 @@ button {
 
 .mobile-opportunity-card {
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.04);
+  background: color-mix(in srgb, var(--t-text) 4.0%, transparent);
   border-radius: 22px;
   padding: 16px;
 }
@@ -2111,5 +2127,91 @@ button {
 @media (min-width: 761px) {
   .desktop-table-shell {
     display: block;
+  }
+}
+
+.trust-check-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.trust-check {
+  display: grid;
+  grid-template-columns: 52px 1fr;
+  gap: 10px;
+  align-items: start;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--t-text) 3.0%, transparent);
+}
+
+.trust-check div {
+  display: grid;
+  gap: 2px;
+}
+
+.trust-check span:not(.trust-check-status) {
+  color: var(--muted-strong);
+  font-size: 0.9rem;
+}
+
+.trust-check-status {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: center;
+  padding: 3px 0;
+  border-radius: 999px;
+}
+
+.trust-pass .trust-check-status { color: var(--positive, #7ee0c3); background: rgba(126, 224, 195, 0.14); }
+.trust-warn .trust-check-status { color: #ffca7a; background: rgba(255, 202, 122, 0.14); }
+.trust-fail .trust-check-status { color: var(--danger); background: var(--danger-soft); }
+.trust-info .trust-check-status { color: var(--muted-strong); background: color-mix(in srgb, var(--t-text) 8.0%, transparent); }
+.trust-fail { border-color: rgba(255, 125, 125, 0.35); }
+
+.top-nav-button {
+  border: 0;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.admin-panel {
+  max-width: 920px;
+}
+
+.admin-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.admin-card p {
+  margin: 6px 0;
+}
+
+.admin-card-muted {
+  opacity: 0.72;
+}
+
+.admin-key-form,
+.admin-token-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+@media (min-width: 720px) {
+  .admin-key-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-key-form .button-row {
+    grid-column: 1 / -1;
   }
 }

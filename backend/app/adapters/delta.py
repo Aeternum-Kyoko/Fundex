@@ -6,17 +6,21 @@ import json
 from datetime import datetime, timedelta, timezone
 
 import websockets
+import logging
 
 from app.adapters.base import ExchangeAdapter
 from app.models.market import FundingSnapshot
 from app.services.symbol_registry import normalize_exchange_symbol
 
+logger = logging.getLogger(__name__)
+
 
 class DeltaAdapter(ExchangeAdapter):
     exchange = "delta"
     display_name = "Delta Exchange India"
-    _ws_url = "wss://public-socket.india.delta.exchange"
+    _ws_url = "wss://socket.india.delta.exchange"
     _metadata_ttl = timedelta(hours=6)
+    _funding_cache_max_age = timedelta(minutes=2)
 
     def __init__(self, client, settings=None) -> None:
         super().__init__(client, settings)
@@ -170,6 +174,35 @@ class DeltaAdapter(ExchangeAdapter):
 
             self._funding_task = asyncio.create_task(self._run_funding_stream(), name="delta-funding-rate-stream")
 
+    def _fresh_funding_metadata(self, symbol: str, now: datetime | None = None) -> dict:
+        # A stalled stream must never pin an old rate over the fresh REST ticker.
+        cached = self._funding_cache.get(symbol)
+        if not cached:
+            return {}
+        received_at = self._parse_next_funding_realization(cached.get("timestamp"))
+        if received_at is None or (now or datetime.now(timezone.utc)) - received_at > self._funding_cache_max_age:
+            return {}
+        return cached
+
+    async def close(self) -> None:
+        if self._funding_task and not self._funding_task.done():
+            self._funding_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._funding_task
+
+    @staticmethod
+    def _parse_funding_message(payload: dict) -> dict:
+        # Prefer the predicted rate for the upcoming settlement; fall back to the current rate.
+        rate = payload.get("predicted_funding_rate")
+        if rate is None:
+            rate = payload.get("funding_rate", payload.get("fr"))
+        return {
+            "funding_rate_percent": rate,
+            "funding_interval_seconds": payload.get("funding_interval", payload.get("fi")),
+            "next_funding_realization": payload.get("next_funding_realization", payload.get("nfr")),
+            "timestamp": payload.get("timestamp", payload.get("ts")),
+        }
+
     async def _run_funding_stream(self) -> None:
         while True:
             try:
@@ -192,19 +225,15 @@ class DeltaAdapter(ExchangeAdapter):
                         if payload.get("type") != "funding_rate":
                             continue
 
-                        symbol = payload.get("sy")
+                        symbol = payload.get("symbol") or payload.get("sy")
                         if not symbol:
                             continue
 
-                        self._funding_cache[symbol] = {
-                            "funding_rate_percent": payload.get("fr"),
-                            "funding_interval_seconds": payload.get("fi"),
-                            "next_funding_realization": payload.get("nfr"),
-                            "timestamp": payload.get("ts"),
-                        }
+                        self._funding_cache[symbol] = self._parse_funding_message(payload)
             except asyncio.CancelledError:
                 raise
             except Exception:
+                logger.warning("Delta funding stream dropped; reconnecting", exc_info=True)
                 await asyncio.sleep(3)
 
     async def fetch_snapshots(self) -> list[FundingSnapshot]:
@@ -234,7 +263,7 @@ class DeltaAdapter(ExchangeAdapter):
             )
 
             product_metadata = self._product_metadata.get(symbol, {})
-            funding_metadata = self._funding_cache.get(symbol, {})
+            funding_metadata = self._fresh_funding_metadata(symbol)
             funding_interval_seconds = funding_metadata.get("funding_interval_seconds") or product_metadata.get("funding_interval_seconds")
             funding_interval_hours = (
                 max(1, int(funding_interval_seconds) // 3600)

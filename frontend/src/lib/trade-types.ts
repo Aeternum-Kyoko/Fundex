@@ -17,6 +17,7 @@ export interface TradeCreateRequest {
   selected_exchanges: ExchangeName[];
   mode: "paper" | "live";
   scenario: "best" | "reverse";
+  strategy?: "capture" | "hold";
   capital_usd: number;
   leverage: number;
   leverage_overrides?: Partial<Record<ExchangeName, number>>;
@@ -74,8 +75,20 @@ export interface TradeLegExecution {
   exit_order_id: string | null;
   entry_fill_price: number | null;
   exit_fill_price: number | null;
+  entry_mid_price?: number | null;
+  exit_mid_price?: number | null;
   raw_entry_response: Record<string, unknown> | null;
   raw_exit_response: Record<string, unknown> | null;
+}
+
+export interface FundingLegResult {
+  exchange: ExchangeName;
+  side: "long" | "short";
+  settles_at: string;
+  predicted_rate: number;
+  actual_rate: number | null;
+  source: "pending" | "exchange_history" | "post_settlement_feed" | "estimate";
+  payment_usd: number | null;
 }
 
 export interface TradeSessionResponse {
@@ -102,6 +115,11 @@ export interface TradeSessionResponse {
   realized_funding_pnl_usd: number | null;
   realized_total_fees_usd: number | null;
   realized_net_pnl_usd: number | null;
+  strategy?: "capture" | "hold";
+  funding_status?: "not_applicable" | "pending" | "settled" | "partly_estimated" | "estimated";
+  funding_legs?: FundingLegResult[];
+  expected_slippage_usd?: number | null;
+  realized_slippage_usd?: number | null;
   warnings: string[];
   events: TradeEvent[];
   long_leg: TradeLegExecution;

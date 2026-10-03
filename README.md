@@ -1,6 +1,6 @@
-# ArbRadar - Binance vs Delta Funding Monitor
+# Fundex - Binance vs Delta Funding Monitor
 
-ArbRadar is a monitor-first funding spread dashboard for `Binance`, `Delta Exchange India`, and `CoinDCX`. It tracks live funding differences, ranks opportunities, stores short-term history, and sends Telegram alerts when high-quality spreads enter or exit the qualified alert set.
+Fundex is a monitor-first funding spread dashboard for `Binance`, `Delta Exchange India`, `CoinDCX`, and `WazirX`. It tracks live funding differences, ranks opportunities, stores short-term history, and sends Telegram alerts when high-quality spreads enter or exit the qualified alert set.
 
 ## Current Phase
 
@@ -10,6 +10,7 @@ This build is for monitoring and alerting only:
 
 - live Binance and Delta public market-data ingestion
 - live CoinDCX public market-data ingestion
+- live WazirX futures public market-data ingestion (USDT perps, monitor-only; set `WAZIRX_ENABLED=true`)
 - funding-spread ranking
 - exchange health and runtime metrics
 - history persistence in SQLite
@@ -141,6 +142,39 @@ Retention settings:
 - `FUNDING_SNAPSHOT_RETENTION_HOURS`
 - `OPPORTUNITY_HISTORY_RETENTION_DAYS`
 - `TELEGRAM_ALERT_STATE_RETENTION_DAYS`
+
+Admin and exchange keys:
+
+- `ADMIN_TOKEN`: enables the Admin button (exchange API keys). Leave empty to disable admin entirely.
+- `CREDENTIALS_ENCRYPTION_KEY`: Fernet key used to encrypt stored exchange keys. Without it keys cannot be saved.
+- Keys only add accuracy where an exchange has something private: Binance (your real taker fee tier, plus a withdrawal-permission check) and CoinSwitch (required for any data). Delta, CoinDCX and WazirX public data is already complete.
+
+Accuracy settings:
+
+- `HOLDING_HORIZON_HOURS` (default 168): net return / net APR assume this hold, with fees and slippage paid once.
+- `LIQUIDITY_REFERENCE_NOTIONAL_USD` (default 1000): order-book slippage is measured for this size per leg.
+- `MAX_PAIR_PRICE_DISLOCATION_PERCENT` (default 3): pairs whose mark prices differ more are treated as different instruments.
+
+How numbers are computed:
+
+- Each leg's predicted funding rate is normalised to per-hour using that contract's own interval (Binance `fundingInfo`, Delta product specs, CoinDCX instrument data, WazirX observed rollovers).
+- `spread_rate` is the hourly spread expressed per 8h. Expected funding counts each leg's real settlement times inside the horizon.
+- Every opportunity carries `trust_level` and `trust_checks` (freshness, rate refresh cadence, intervals, order-book fill, price match, profitability, persistence, first settlement). Edges tracked for under 20 minutes are capped at medium trust.
+
+Trading and results:
+
+- Strategy `capture` (default) arms the next-settlement setup: enter `entry_seconds_before_funding` before, exit `exit_seconds_after_funding` after. `hold` keeps the multi-day hedge.
+- Paper trades fill against the live public order book at the actual entry/exit seconds for the planned size, and refuse to fill when the book is too thin.
+- After each settlement the engine fetches the settled rate (Binance funding history, Delta funding candles, CoinDCX post-settlement feed; WazirX/CoinSwitch fall back to a labelled estimate) and replaces the prediction.
+- Every paper and live trade is stored in the `trade_journal` table and listed at `GET /api/trade/journal`; the Performance page (`/performance`) analyses it. Trades running during a restart are marked failed with a note to check positions.
+- Live entry sends both legs together; live exit retries each leg three times and reports any leg left open.
+
+Backtest (`/backtest`, `POST /api/backtest/run`, `POST /api/backtest/resimulate`):
+
+- Replays next-settlement captures over settled funding history from Binance (`fundingRate`) and Delta (`FUNDING:<symbol>` hourly candles), cached in the `funding_history` table. CoinDCX mirrors Binance and WazirX has no history, so it covers Binance <-> Delta.
+- Decisions use the settled rate (live trading decides ~30s before on the prediction), so results are slightly optimistic; spikes on thin coins can slip far more than the setting.
+
+Deployment: see `deploy/DEPLOY.md` (Oracle Cloud Always Free + Docker + Caddy HTTPS).
 
 ### Frontend
 

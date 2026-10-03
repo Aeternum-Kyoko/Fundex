@@ -10,7 +10,7 @@ from app.models.market import ExchangeName
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    app_name: str = "ArbRadar API"
+    app_name: str = "Fundex API"
     app_env: str = "development"
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173", "http://127.0.0.1:5173"])
 
@@ -19,12 +19,25 @@ class Settings(BaseSettings):
     min_confidence_score: float = 0.35
     min_combined_oi_usd: float = 500_000
     max_price_dislocation_percent: float = 0.75
+    # Pairs whose mark prices differ by more than this are almost certainly different instruments
+    # (e.g. a 1000x-denominated contract), so they are dropped instead of ranked.
+    max_pair_price_dislocation_percent: float = 3.0
+    # Net return / net APR assume the hedge is held this long (entry + exit costs paid once).
+    holding_horizon_hours: int = 168
+    # Order-book slippage is measured for this position size per leg (USD notional).
+    liquidity_reference_notional_usd: float = 1_000
+    liquidity_top_n: int = 40
+    liquidity_max_age_seconds: float = 120
+    # Admin API (exchange keys). Disabled unless ADMIN_TOKEN is set; keys need CREDENTIALS_ENCRYPTION_KEY.
+    admin_token: str | None = None
+    credentials_encryption_key: str | None = None
 
     binance_enabled: bool = True
     delta_enabled: bool = True
     coindcx_enabled: bool = False
     coindcx_api_key: str | None = None
     coindcx_secret_key: str | None = None
+    wazirx_enabled: bool = False
     coinswitch_enabled: bool = False
     coinswitch_api_key: str | None = None
     coinswitch_secret_key: str | None = None
@@ -33,8 +46,14 @@ class Settings(BaseSettings):
     telegram_bot_token: str | None = None
     telegram_chat_id: str | None = None
     telegram_chat_ids: list[str] = Field(default_factory=list)
-    telegram_min_spread_percent: float = 0.5
+    telegram_min_spread_percent: float = 0.05
     telegram_min_confidence_score: float = 0.55
+    # Next-settlement alerts: sent this many minutes before a settlement whose capture nets at least the threshold.
+    telegram_capture_alerts_enabled: bool = True
+    telegram_capture_lead_minutes: int = 10
+    telegram_min_capture_net_percent: float = 0.0
+    # Message the alert chats when a paper or live trade finishes, settles, or fails.
+    telegram_trade_notifications: bool = True
     telegram_min_combined_oi_usd: float = 1_000_000
     telegram_max_staleness_seconds: int = 45
     telegram_top_n: int = 5
@@ -84,6 +103,8 @@ class Settings(BaseSettings):
             exchanges.append("coindcx")
         if self.coinswitch_enabled and self.coinswitch_configured:
             exchanges.append("coinswitch")
+        if self.wazirx_enabled:
+            exchanges.append("wazirx")
         return exchanges
 
 

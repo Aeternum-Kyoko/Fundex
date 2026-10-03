@@ -64,7 +64,7 @@ class CoinDCXAdapter(ExchangeAdapter):
 
             active_pairs_response = await self.client.get(
                 "https://api.coindcx.com/exchange/v1/derivatives/futures/data/active_instruments?margin_currency_short_name[]=USDT",
-                headers={"User-Agent": "Mozilla/5.0 ArbRadar/1.0"},
+                headers={"User-Agent": "Mozilla/5.0 Fundex/1.0"},
                 timeout=30.0,
             )
             active_pairs_response.raise_for_status()
@@ -77,7 +77,7 @@ class CoinDCXAdapter(ExchangeAdapter):
                     response = await self.client.get(
                         "https://api.coindcx.com/exchange/v1/derivatives/futures/data/instrument",
                         params={"pair": pair, "margin_currency_short_name": "USDT"},
-                        headers={"User-Agent": "Mozilla/5.0 ArbRadar/1.0"},
+                        headers={"User-Agent": "Mozilla/5.0 Fundex/1.0"},
                         timeout=30.0,
                     )
                     response.raise_for_status()
@@ -103,7 +103,7 @@ class CoinDCXAdapter(ExchangeAdapter):
 
         response = await self.client.get(
             "https://public.coindcx.com/market_data/v3/current_prices/futures/rt",
-            headers={"User-Agent": "Mozilla/5.0 ArbRadar/1.0"},
+            headers={"User-Agent": "Mozilla/5.0 Fundex/1.0"},
             timeout=30.0,
         )
         response.raise_for_status()
@@ -137,6 +137,14 @@ class CoinDCXAdapter(ExchangeAdapter):
             maker_fee_bps = float(instrument.get("maker_fee", self._default_maker_fee_bps / 100)) * 100
             taker_fee_bps = float(instrument.get("taker_fee", self._default_taker_fee_bps / 100)) * 100
 
+            # `efr` is the predicted rate for the upcoming settlement (it matches Binance's premiumIndex);
+            # `fr` is the rate that already settled, so comparing it against other venues' predictions is wrong.
+            predicted_rate = item.get("efr")
+            settled_rate = item.get("fr")
+            funding_rate = predicted_rate if predicted_rate is not None else settled_rate
+            if funding_rate is None:
+                continue
+
             snapshots.append(
                 FundingSnapshot(
                     exchange=self.exchange,
@@ -144,17 +152,20 @@ class CoinDCXAdapter(ExchangeAdapter):
                     canonical_symbol=canonical_symbol,
                     base_asset=base_asset,
                     quote_asset=quote_asset,
-                    funding_rate=float(item["fr"]),
+                    funding_rate=float(funding_rate),
                     funding_interval_hours=funding_interval_hours,
                     max_leverage=self._extract_max_leverage(instrument),
                     mark_price=float(item["mp"]) if item.get("mp") is not None else None,
-                    volume_24h=float(item["v"]) if item.get("v") is not None else None,
+                    # `v` equals Binance's 24h quote volume for every pair (checked 505/505), not CoinDCX's own.
                     next_funding_time=next_funding_time,
                     maker_fee_bps=maker_fee_bps,
                     taker_fee_bps=taker_fee_bps,
                     metadata={
                         "source": "coindcx_current_prices",
-                        "estimated_funding_rate": float(item.get("efr", item["fr"])),
+                        "estimated_funding_rate": float(predicted_rate) if predicted_rate is not None else None,
+                        "binance_reference_volume_usd": float(item["v"]) if item.get("v") is not None else None,
+                        "last_settled_funding_rate": float(settled_rate) if settled_rate is not None else None,
+                        "funding_rate_source": "efr" if predicted_rate is not None else "fr",
                         "feed_timestamp_ms": feed_timestamp_ms,
                         "instrument_status": instrument.get("status"),
                         "margin_currency": instrument.get("margin_currency_short_name"),

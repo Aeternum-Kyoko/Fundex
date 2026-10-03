@@ -40,7 +40,7 @@ class TelegramNotifierTests(unittest.IsolatedAsyncioTestCase):
         await self.store.mark_symbol_alert_entered(entered.entered[0].opportunity)
 
         exited = await self.notifier._build_transition_batch(  # noqa: SLF001
-            [make_opportunity(canonical_symbol="SOL-USDT-PERP", spread_rate=0.002)]
+            [make_opportunity(canonical_symbol="SOL-USDT-PERP", spread_rate=0.0003)]  # 0.03%/8h, under the 0.05% alert minimum
         )
         self.assertIsNotNone(exited)
         self.assertEqual(exited.entered, [])

@@ -4,6 +4,7 @@ from fastapi import HTTPException
 
 from app.models.execution import ExecutionLegPlan, ExecutionPlanResponse
 from app.models.market import ArbitrageOpportunity
+from app.services.opportunity_ranker import HOURS_PER_YEAR, expected_funding_over_hours
 
 
 def reverse_opportunity(opportunity: ArbitrageOpportunity) -> ArbitrageOpportunity:
@@ -12,13 +13,18 @@ def reverse_opportunity(opportunity: ArbitrageOpportunity) -> ArbitrageOpportuni
     if reverse_warning not in warnings:
         warnings.append(reverse_warning)
 
+    reversed_net_return = -opportunity.expected_funding_percent - opportunity.estimated_total_cost_percent
     return opportunity.model_copy(
         update={
             "long_leg": opportunity.short_leg,
             "short_leg": opportunity.long_leg,
             "spread_rate": -opportunity.spread_rate,
+            "spread_rate_hourly": -opportunity.spread_rate_hourly,
             "gross_apr_percent": -opportunity.gross_apr_percent,
-            "net_apr_percent": -opportunity.net_apr_percent,
+            "expected_funding_percent": -opportunity.expected_funding_percent,
+            "net_return_percent": reversed_net_return,
+            "net_apr_percent": reversed_net_return * HOURS_PER_YEAR / max(opportunity.holding_horizon_hours, 1),
+            "break_even_hours": None,
             "warnings": warnings,
         }
     )
@@ -115,6 +121,7 @@ def build_execution_plan(
     holding_periods: int,
     basis_risk_buffer_percent: float,
     scenario: str = "best",
+    funding_fraction_override: float | None = None,
 ) -> ExecutionPlanResponse:
     if leverage < 1:
         raise HTTPException(status_code=400, detail="leverage must be at least 1.")
@@ -178,15 +185,19 @@ def build_execution_plan(
         + short_leg.estimated_exit_fee_usd
     )
     estimated_total_slippage_usd = (opportunity.estimated_slippage_percent / 100) * (notional_usd * 2)
-    estimated_funding_pnl_usd = opportunity.spread_rate * notional_usd * holding_periods
+    # A "period" is the faster leg's settlement interval; funding comes from each leg's real schedule.
+    holding_hours = holding_periods * max(opportunity.funding_interval_hours, 1)
+    estimated_funding_pnl_usd = (
+        funding_fraction_override * notional_usd
+        if funding_fraction_override is not None
+        # Capture plans pass the single-settlement payment; hold plans walk each leg's schedule.
+        else expected_funding_over_hours(opportunity.long_leg, opportunity.short_leg, holding_hours) * notional_usd
+    )
     estimated_basis_risk_reserve_usd = (basis_risk_buffer_percent / 100) * (notional_usd * 2)
     capital_required_usd = long_leg.initial_margin_usd + short_leg.initial_margin_usd + estimated_total_fees_usd
-    expected_net_pnl_usd = (
-        estimated_funding_pnl_usd
-        - estimated_total_fees_usd
-        - estimated_total_slippage_usd
-        - estimated_basis_risk_reserve_usd
-    )
+    # The basis reserve is cash to keep aside for price gaps between the legs, not a cost, so it is
+    # reported separately and left out of the net (realised results never subtract it either).
+    expected_net_pnl_usd = estimated_funding_pnl_usd - estimated_total_fees_usd - estimated_total_slippage_usd
     expected_net_return_on_capital_percent = (
         (expected_net_pnl_usd / capital_required_usd) * 100 if capital_required_usd > 0 else 0.0
     )
@@ -205,7 +216,7 @@ def build_execution_plan(
     ]
 
     if expected_net_pnl_usd <= 0:
-        warnings.append("This dry-run plan is not net profitable after fees, slippage, and basis reserve.")
+        warnings.append("Not profitable after fees and slippage at this size.")
     if long_leverage > 5 or short_leverage > 5:
         warnings.append("Leverage above 5x increases liquidation and execution risk materially.")
 

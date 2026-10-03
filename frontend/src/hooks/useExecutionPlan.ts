@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import type { ExecutionPlanResponse } from "../lib/execution-types";
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "/api";
+// Stable default: a fresh {} per render would re-trigger the fetch effect forever.
+const NO_OVERRIDES: Record<string, number> = {};
 
 interface ExecutionPlanOptions {
   capitalUsd?: number;
@@ -9,6 +11,7 @@ interface ExecutionPlanOptions {
   leverageByExchange?: Record<string, number>;
   holdingPeriods?: number;
   reverse?: boolean;
+  strategy?: "capture" | "hold";
 }
 
 export function useExecutionPlan(
@@ -23,9 +26,10 @@ export function useExecutionPlan(
   const exchangeQuery = selectedExchanges.join(",");
   const capitalUsd = options.capitalUsd ?? 1000;
   const leverage = options.leverage ?? 2;
-  const leverageByExchange = options.leverageByExchange ?? {};
+  const leverageByExchange = options.leverageByExchange ?? NO_OVERRIDES;
   const holdingPeriods = options.holdingPeriods ?? 1;
   const reverse = options.reverse ?? false;
+  const strategy = options.strategy ?? "hold";
 
   useEffect(() => {
     let cancelled = false;
@@ -42,7 +46,7 @@ export function useExecutionPlan(
       setLoading(true);
       try {
         const exchangeSuffix = exchangeQuery ? `&exchanges=${encodeURIComponent(exchangeQuery)}` : "";
-        const reverseSuffix = reverse ? "&reverse=true" : "";
+        const reverseSuffix = `${reverse ? "&reverse=true" : ""}&strategy=${strategy}`;
         const leverageOverrideEntries = Object.entries(leverageByExchange).filter(([, value]) => Number.isFinite(value) && value >= 1);
         const leverageOverrideSuffix = leverageOverrideEntries.length
           ? `&leverage_overrides=${encodeURIComponent(JSON.stringify(Object.fromEntries(leverageOverrideEntries)))}`
@@ -75,7 +79,7 @@ export function useExecutionPlan(
     return () => {
       cancelled = true;
     };
-  }, [canonicalSymbol, enabled, exchangeQuery, capitalUsd, leverage, leverageByExchange, holdingPeriods, reverse]);
+  }, [canonicalSymbol, enabled, exchangeQuery, capitalUsd, leverage, leverageByExchange, holdingPeriods, reverse, strategy]);
 
   return { plan, loading, error };
 }

@@ -19,3 +19,7 @@ class ExchangeAdapter(ABC):
     @abstractmethod
     async def fetch_snapshots(self) -> list[FundingSnapshot]:
         raise NotImplementedError
+
+    async def close(self) -> None:
+        """Stop any background work the adapter owns (streams, refresh tasks)."""
+        return None

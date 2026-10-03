@@ -1,0 +1,18 @@
+{$SITE_ADDRESS:localhost} {
+	encode zstd gzip
+
+	# API and the live-update stream go to the backend container.
+	handle /api/* {
+		reverse_proxy backend:8000 {
+			# Server-sent events must not be buffered.
+			flush_interval -1
+		}
+	}
+
+	# Everything else is the single-page app.
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}
