@@ -142,6 +142,13 @@ def _settlement_items(snapshots: list, limit: int) -> list[FundingSettlementItem
     ]
 
 
+@router.get("/symbols")
+async def list_symbols(request: Request) -> list[str]:
+    """Canonical symbols that currently have usable data, for the Compare picker on any page."""
+    snapshots = await _snapshots_for_exchanges(request, _enabled_exchanges(request))
+    return sorted({snapshot.canonical_symbol for snapshot in snapshots if is_snapshot_usable(snapshot)})
+
+
 @router.get("/dashboard")
 async def dashboard(request: Request, exchanges: str | None = None) -> dict:
     """Everything the main screen needs in one (gzipped) response."""

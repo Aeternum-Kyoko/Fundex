@@ -30,7 +30,7 @@ function resolveRoute() {
   }
   if (pathname === "/performance") {
     return (
-      <PageFrame active="performance">
+      <PageFrame active="results">
         <Performance />
       </PageFrame>
     );

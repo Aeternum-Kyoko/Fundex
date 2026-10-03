@@ -278,6 +278,7 @@
 .t-icon-btn svg { width: 18px; height: 18px; }
 
 .t-text-btn {
+  white-space: nowrap;
   height: 38px;
   padding: 0 14px;
   border-radius: 10px;
@@ -309,7 +310,10 @@
   .t-shell[data-detail="open"] {
     grid-template-columns: minmax(0, 1fr) 420px;
   }
+}
 
+/* No dock from 1100px up, so the page does not need to leave room for it. */
+@media (min-width: 1100px) {
   .t-main { padding-bottom: 40px; }
 }
 
@@ -1118,19 +1122,17 @@
 
 @keyframes t-shimmer { to { background-position: -200% 0; } }
 
-/* ---------- Bottom nav (phone) ---------- */
+/* ---------- Dock (bottom navigation) ---------- */
+/* One navigation for every screen: the dock below 1100px wide, the top-bar links from 1100px up. */
 
-.t-bottomnav {
-  display: none;
-}
+:root { --t-dock-h: 62px; }
+
+.t-dock { display: none; }
 
 @media (max-width: 759px) {
   .t-app { font-size: 15px; }
 
   .t-topbar { gap: 10px; }
-  .t-topbar .t-health-pill span:not(.t-dot) { display: none; }
-  .t-topbar .t-health-pill { padding: 6px; border: 0; background: none; }
-  .t-topbar .t-health { gap: 3px; }
   .t-search { display: none; }
   .t-search[data-open="true"] {
     display: flex;
@@ -1157,7 +1159,9 @@
   .t-best-card { flex: 0 0 86%; scroll-snap-align: start; }
   .t-best-empty { flex: 1 0 100%; }
 
-  .t-tabs { display: none; }
+  .t-tabs { overflow-x: auto; scrollbar-width: none; margin: 0 -16px 12px; padding: 0 16px; }
+  .t-tabs::-webkit-scrollbar { display: none; }
+  .t-tab { white-space: nowrap; }
 
   .t-toolbar { flex-wrap: nowrap; overflow-x: auto; margin: 0 -16px 12px; padding: 0 16px 2px; scrollbar-width: none; }
   .t-toolbar::-webkit-scrollbar { display: none; }
@@ -1166,43 +1170,10 @@
   .t-segmented { max-width: none; }
   .t-toolbar-end { display: none; }
 
-  .t-bottomnav {
-    position: fixed;
-    z-index: 45;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    padding: 6px 8px calc(6px + var(--t-safe-b));
-    background: color-mix(in srgb, var(--t-bg) 88%, transparent);
-    backdrop-filter: blur(18px) saturate(1.2);
-    -webkit-backdrop-filter: blur(18px) saturate(1.2);
-    border-top: 1px solid var(--t-line);
-  }
-
-  .t-bottomnav button,
-  .t-bottomnav a {
-    display: grid;
-    justify-items: center;
-    gap: 2px;
-    padding: 6px 0;
-    border: 0;
-    background: none;
-    color: var(--t-text-3);
-    font-size: 11.5px;
-    cursor: pointer;
-  }
-
-  .t-bottomnav a { text-decoration: none; }
-  .t-bottomnav button svg,
-  .t-bottomnav a svg { width: 22px; height: 22px; }
   .t-nav { display: none; }
   .t-pulse { margin: 0 -16px 14px; padding: 0 16px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
   .t-pulse > * { flex-shrink: 0; }
   .t-footnote { display: none; }
-  .t-bottomnav button[aria-selected="true"] { color: var(--t-text); }
-  .t-bottomnav button[aria-selected="true"] svg { color: var(--t-amber); }
 
   .t-settle-row { grid-template-columns: 80px minmax(0, 1fr) auto; }
   .t-settle-row .t-hide-phone { display: none; }
@@ -1450,17 +1421,63 @@
   .t-capture-table .t-head > :nth-child(3) { display: none; }
 }
 
-/* The menu (bot, export, keys, theme) is always one tap away on tablet and desktop. */
-.t-menu-btn { display: inline-grid; }
-
-/* Laptop widths: the section links need room next to the feed pills; below this they move into the menu. */
-@media (min-width: 760px) and (max-width: 1279px) {
-  .t-nav:not(.t-nav-always) { display: none; }
+/* Exchange feed pills show only a coloured dot (name and age in the tooltip) until there is room for labels. */
+@media (max-width: 1499px) {
+  .t-topbar .t-health-pill span:not(.t-dot) { display: none; }
+  .t-topbar .t-health-pill { padding: 6px; border: 0; background: none; }
+  .t-topbar .t-health { gap: 3px; }
 }
 
-@media (max-width: 759px) {
+/* Below 1100px the dock is the navigation: the top-bar links and the extra menu button step aside. */
+@media (max-width: 1099px) {
+  .t-nav { display: none !important; }
   .t-menu-btn { display: none; }
+
+  .t-dock {
+    position: fixed;
+    z-index: 45;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    height: calc(var(--t-dock-h) + var(--t-safe-b));
+    padding: 6px 8px var(--t-safe-b);
+    background: color-mix(in srgb, var(--t-bg) 90%, transparent);
+    backdrop-filter: blur(18px) saturate(1.2);
+    -webkit-backdrop-filter: blur(18px) saturate(1.2);
+    border-top: 1px solid var(--t-line);
+  }
+
+  .t-dock a,
+  .t-dock button {
+    display: grid;
+    justify-items: center;
+    align-content: center;
+    gap: 2px;
+    padding: 4px 0;
+    border: 0;
+    border-radius: 12px;
+    background: none;
+    color: var(--t-text-3);
+    font-size: 11.5px;
+    font-weight: 500;
+    text-decoration: none;
+    cursor: pointer;
+  }
+
+  .t-dock svg { width: 22px; height: 22px; }
+  .t-dock [aria-current="page"],
+  .t-dock [data-open="true"] { color: var(--t-text); }
+  .t-dock [aria-current="page"] svg,
+  .t-dock [data-open="true"] svg { color: var(--t-amber); }
 }
+
+@media (min-width: 1100px) {
+  .t-menu-btn { display: inline-grid; }
+}
+
+.t-nav [aria-current="page"] { color: var(--t-text); background: var(--t-bg-raised); }
 
 .t-card-meta { flex-wrap: wrap; row-gap: 4px; }
 
@@ -1780,10 +1797,28 @@ a.t-perf-row:hover { background: var(--t-surface); }
   .td-side { position: static; }
 }
 
+/* Tablet and phone: show the plan and the running trade right under the clock, not at the bottom. */
+@media (max-width: 1023px) {
+  .td-grid { display: flex; flex-direction: column; gap: 16px; }
+  .td-main { display: contents; }
+  .td-clock { order: 1; }
+  .td-side { order: 2; }
+  .td-main > :not(.td-clock) { order: 3; }
+}
+
 .td-mobile-arm { display: none; }
 
 @media (max-width: 759px) {
-  .td-steps { grid-template-columns: repeat(5, minmax(56px, 1fr)); overflow-x: auto; }
+  .td-switches { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
+  .td-switches .t-strategy { grid-column: 1 / -1; }
+  .td-switches .t-segmented { display: flex; }
+  .td-switches .t-segmented button { flex: 1; }
+  .td-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .td-keyset { grid-column: 1 / -1; }
+  .td-steps { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
+  .td-steps li { font-size: 12px; }
+  .td-steps small { font-size: 11px; letter-spacing: -0.02em; }
+  .td-clock-facts { min-width: 0; width: 100%; }
   .td-clock { padding: 16px; }
   .td-page { padding-bottom: calc(170px + var(--t-safe-b)); }
   .td-mobile-arm {
@@ -1791,7 +1826,7 @@ a.t-perf-row:hover { background: var(--t-surface); }
     z-index: 44;
     left: 0;
     right: 0;
-    bottom: calc(64px + var(--t-safe-b));
+    bottom: calc(var(--t-dock-h) + var(--t-safe-b));
     display: flex;
     align-items: center;
     justify-content: space-between;

@@ -38,11 +38,11 @@ export function TrustBadge({ level, compact = false }: { level: TrustLevel; comp
   );
 }
 
-export function formatCountdownShort(target: string | null | undefined, now: number) {
+export function formatCountdownShort(target: string | null | undefined, now: number, doneLabel = "settling") {
   if (!target) return "—";
   const ms = new Date(target).getTime() - now;
   if (!Number.isFinite(ms)) return "—";
-  if (ms <= 0) return "settling";
+  if (ms <= 0) return doneLabel;
   const total = Math.floor(ms / 1000);
   const h = Math.floor(total / 3600);
   const m = Math.floor((total % 3600) / 60);
@@ -52,10 +52,16 @@ export function formatCountdownShort(target: string | null | undefined, now: num
 }
 
 /** Re-renders on its own every second; the rest of the screen stays still. */
-export const Countdown = memo(function Countdown({ target }: { target: string | null | undefined }) {
+export const Countdown = memo(function Countdown({ target, doneLabel }: { target: string | null | undefined; doneLabel?: string }) {
   const now = useClock();
-  return <span className="t-num">{formatCountdownShort(target, now)}</span>;
+  return <span className="t-num">{formatCountdownShort(target, now, doneLabel)}</span>;
 });
+
+/** Compact 24-hour time with seconds, e.g. 16:29:30. Short enough for narrow timeline columns. */
+export function clockTime(value: string | null | undefined) {
+  if (!value) return "";
+  return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+}
 
 export function pct(value: number | null | undefined, digits = 2, signed = false) {
   if (value == null || !Number.isFinite(value)) return "—";

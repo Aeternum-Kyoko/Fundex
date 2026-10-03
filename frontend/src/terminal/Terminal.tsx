@@ -1,13 +1,13 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { AdminPanel } from "../components/AdminPanel";
 import type { ArbitrageOpportunity, ExchangeStatus, TrustLevel } from "../lib/types";
 import { useClock } from "./clock";
 import { DetailContent, DetailSheet } from "./detail";
 import { type Density, PairCards, PairTable, type SortKey } from "./pairs";
 import { CaptureCards, CapturePicks, type CaptureRow, CaptureTable } from "./capture";
-import { CompareDialog, Dialog, downloadCsv, FeedsPanel, MoreSheet, PulseStrip } from "./panels";
+import { type SectionTab, AppChrome } from "./chrome";
+import { Dialog, downloadCsv, FeedsPanel, PulseStrip } from "./panels";
 import { useMediaQuery, usePref } from "./prefs";
-import { BrandMark, EdgeLine, type EdgeScale, EXCHANGE_SHORT, exchangeVar, hoursLabel, Icon, makeEdgeScale, nextPayout, pct, TrustBadge } from "./primitives";
+import { EdgeLine, type EdgeScale, EXCHANGE_SHORT, exchangeVar, hoursLabel, Icon, makeEdgeScale, nextPayout, pct, TrustBadge } from "./primitives";
 import { useDashboard } from "./useDashboard";
 import { AlertsView, Empty, LeadersView, SettlementsView, useAlerts } from "./views";
 import "./design.css";
@@ -18,7 +18,6 @@ type Filter = "all" | "profitable" | "trusted" | "alerting";
 type Strategy = "capture" | "hold";
 
 const TRUST_RANK: Record<TrustLevel, number> = { low: 0, medium: 1, high: 2 };
-const THEME_KEY = "arbradar-theme";
 
 function horizonText(hours: number) {
   return hours % 24 === 0 ? `${hours / 24} days` : `${hours}h`;
@@ -158,37 +157,19 @@ export function Terminal() {
   const [captureSort, setCaptureSort] = usePref<SortKey>("arbradar-sort-capture", "next");
   const sort = strategy === "capture" ? captureSort : holdSort;
   const setSort = strategy === "capture" ? setCaptureSort : setHoldSort;
-  const [panel, setPanel] = useState<null | "feeds" | "compare" | "more">(null);
-  const [tab, setTab] = useState<Tab>("pairs");
+  const [panel, setPanel] = useState<null | "feeds">(null);
+  const [tab, setTab] = useState<Tab>(() => {
+    const requested = new URLSearchParams(window.location.search).get("tab");
+    return requested === "leaders" || requested === "settlements" || requested === "alerts" ? requested : "pairs";
+  });
   const [filter, setFilter] = usePref<Filter>("arbradar-filter", "all");
   const [search, setSearch] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [selected, setSelected] = useState<string | null>(() => decodeURIComponent(window.location.hash.slice(1)) || null);
-  const [adminOpen, setAdminOpen] = useState(false);
-  // Stored as a plain string so the pre-paint script in index.html can apply it before React loads.
-  const [theme, setTheme] = useState<"light" | "dark">(() => {
-    let stored: string | null = null;
-    try {
-      stored = window.localStorage.getItem(THEME_KEY);
-    } catch {
-      // ignore
-    }
-    if (stored === "light" || stored === "dark") return stored;
-    return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
-  });
   const isPhone = useMediaQuery("(max-width: 759px)");
   const isWide = useMediaQuery("(min-width: 1180px)");
   const searchRef = useRef<HTMLInputElement>(null);
   const deferredSearch = useDeferredValue(search.trim().toUpperCase());
-
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    try {
-      window.localStorage.setItem(THEME_KEY, theme);
-    } catch {
-      // ignore
-    }
-  }, [theme]);
 
   // The open pair lives in the URL hash: shareable, and the phone's back gesture closes the sheet.
   const open = useCallback((symbol: string) => {
@@ -297,62 +278,51 @@ export function Terminal() {
     />
   ) : null;
 
-  return (
-    <div className="t-app">
-      <header className="t-topbar">
-        <a className="t-brand" href="/" aria-label="Fundex home">
-          <BrandMark />
-          <span className={searchOpen && isPhone ? "t-hide-phone" : undefined}>Fundex</span>
-        </a>
-        <HealthStrip statuses={data?.statuses ?? []} link={link} onOpen={() => setPanel("feeds")} />
-        <nav className="t-nav" aria-label="Sections">
-          <a href="/trade" title="Paper and live trade desk">Trade</a>
-          <a href="/performance">Results</a>
-          <a href="/backtest">Backtest</a>
-          <button type="button" onClick={() => setPanel("compare")}>
-            Compare
-          </button>
-        </nav>
-        <div className="t-topbar-actions">
-          <label className="t-search" data-open={searchOpen}>
-            {Icon.search}
-            <input
-              ref={searchRef}
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              onBlur={() => !search && setSearchOpen(false)}
-              placeholder="Search coin or exchange"
-              aria-label="Search coin or exchange"
-              enterKeyHint="search"
-            />
-            <span className="t-kbd">/</span>
-          </label>
-          {isPhone ? (
-            <button
-              type="button"
-              className="t-icon-btn"
-              aria-label="Search"
-              onClick={() => {
-                setSearchOpen(true);
-                setTab("pairs");
-                window.setTimeout(() => searchRef.current?.focus(), 0);
-              }}
-            >
-              {Icon.search}
-            </button>
-          ) : null}
-          <button type="button" className="t-icon-btn t-menu-btn" onClick={() => setPanel("more")} aria-label="Menu: trade desk, compare, Telegram bot, export">
-            {Icon.more}
-          </button>
-          <button type="button" className="t-icon-btn" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}>
-            {theme === "dark" ? Icon.sun : Icon.moon}
-          </button>
-          <button type="button" className="t-icon-btn" onClick={() => setAdminOpen(true)} aria-label="Exchange API keys">
-            {Icon.key}
-          </button>
-        </div>
-      </header>
+  const topActions = (
+    <>
+      <label className="t-search" data-open={searchOpen}>
+        {Icon.search}
+        <input
+          ref={searchRef}
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          onBlur={() => !search && setSearchOpen(false)}
+          placeholder="Search coin or exchange"
+          aria-label="Search coin or exchange"
+          enterKeyHint="search"
+        />
+        <span className="t-kbd">/</span>
+      </label>
+      {isPhone ? (
+        <button
+          type="button"
+          className="t-icon-btn"
+          aria-label="Search"
+          onClick={() => {
+            setSearchOpen(true);
+            setTab("pairs");
+            window.setTimeout(() => searchRef.current?.focus(), 0);
+          }}
+        >
+          {Icon.search}
+        </button>
+      ) : null}
+    </>
+  );
 
+  return (
+    <AppChrome
+      active="dashboard"
+      exchangesQuery={exchangesQuery}
+      hideBrandText={searchOpen && isPhone}
+      topMiddle={<HealthStrip statuses={data?.statuses ?? []} link={link} onOpen={() => setPanel("feeds")} />}
+      topActions={topActions}
+      onSection={(next: SectionTab) => setTab(next)}
+      moreExtras={[
+        { label: "Export CSV", description: "Download the pairs you're viewing", onClick: () => downloadCsv(rows) },
+        { label: paused ? "Resume live updates" : "Pause live updates", description: paused ? "Numbers are frozen right now" : "Freeze the numbers while you read", onClick: () => setPaused(!paused) },
+      ]}
+    >
       <div className="t-shell" data-detail={selectedRow && isWide ? "open" : "closed"}>
         <main className="t-main">
           {error ? <div className="t-banner" role="alert">{error}</div> : null}
@@ -536,73 +506,11 @@ export function Terminal() {
         </div>
       ) : null}
 
-      <nav className="t-bottomnav" aria-label="Sections">
-        {(
-          [
-            ["pairs", "Pairs", Icon.pairs],
-            ["settlements", "Settle", Icon.clock],
-            ["alerts", "Alerts", Icon.bell],
-          ] as const
-        ).map(([key, label, icon]) => (
-          <button
-            key={key}
-            type="button"
-            aria-selected={tab === key && panel !== "more"}
-            onClick={() => {
-              setTab(key);
-              window.scrollTo({ top: 0, behavior: "smooth" });
-            }}
-          >
-            {icon}
-            {label}
-          </button>
-        ))}
-        <a href="/trade" className="t-bottomnav-link">
-          {Icon.trade}
-          Trade
-        </a>
-        <button type="button" aria-selected={panel === "more"} onClick={() => setPanel("more")}>
-          {Icon.more}
-          More
-        </button>
-      </nav>
-
       {panel === "feeds" ? (
         <Dialog title="Exchange feeds" onClose={() => setPanel(null)}>
           <FeedsPanel statuses={data?.statuses ?? []} />
         </Dialog>
       ) : null}
-      {panel === "compare" ? (
-        <CompareDialog
-          symbols={opportunities.map((row) => row.canonical_symbol)}
-          exchangesQuery={exchangesQuery}
-          initial={selectedRow?.base_asset ?? ""}
-          onClose={() => setPanel(null)}
-        />
-      ) : null}
-      {panel === "more" ? (
-        <MoreSheet
-          onClose={() => setPanel(null)}
-          statuses={data?.statuses ?? []}
-          onCompare={() => setPanel("compare")}
-          onExport={() => downloadCsv(rows)}
-          onKeys={() => {
-            setPanel(null);
-            setAdminOpen(true);
-          }}
-          onTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
-          theme={theme}
-          paused={paused}
-          onPause={() => setPaused(!paused)}
-          onLeaders={() => {
-            setPanel(null);
-            setTab("leaders");
-            window.scrollTo({ top: 0 });
-          }}
-        />
-      ) : null}
-
-      <AdminPanel isOpen={adminOpen} onClose={() => setAdminOpen(false)} />
-    </div>
+    </AppChrome>
   );
 }

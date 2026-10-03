@@ -4,7 +4,7 @@ import type { ArbitrageOpportunity, ExchangeStatus } from "../lib/types";
 import { useClock } from "./clock";
 import { Icon, pct } from "./primitives";
 
-export const TELEGRAM_BOT_URL = "https://t.me/alertbklbot";
+const API_BASE = import.meta.env.VITE_API_URL ?? "/api";
 
 export function downloadCsv(rows: ArbitrageOpportunity[]) {
   const csv = buildOpportunityCsv(rows);
@@ -109,25 +109,26 @@ export function FeedsPanel({ statuses }: { statuses: ExchangeStatus[] }) {
   );
 }
 
-export function CompareDialog({
-  symbols,
-  exchangesQuery,
-  onClose,
-  initial,
-}: {
-  symbols: string[];
-  exchangesQuery: string;
-  onClose: () => void;
-  initial: string;
-}) {
+export function CompareDialog({ exchangesQuery, onClose, initial }: { exchangesQuery: string; onClose: () => void; initial: string }) {
+  const [symbols, setSymbols] = useState<string[]>([]);
   const [value, setValue] = useState(initial);
   const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${API_BASE}/symbols`)
+      .then((response) => (response.ok ? response.json() : []))
+      .then((rows: string[]) => !cancelled && setSymbols(rows))
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const submit = (event: FormEvent) => {
     event.preventDefault();
     const query = value.trim().toUpperCase();
     const match = symbols.find((symbol) => symbol === query) ?? symbols.find((symbol) => symbol.split("-")[0] === query);
     if (!match) {
-      setError(`No live pair for "${value}". Try a ticker like BTC or SOL.`);
+      setError(symbols.length ? `No live pair for "${value}". Try a ticker like BTC or SOL.` : "Coin list is still loading; try again in a moment.");
       return;
     }
     window.location.href = `/compare/${encodeURIComponent(match)}${exchangesQuery}`;
@@ -174,79 +175,3 @@ export function Dialog({ title, onClose, children, wide = false }: { title: stri
     </>
   );
 }
-
-export function MoreSheet({
-  onClose,
-  statuses,
-  onCompare,
-  onExport,
-  onKeys,
-  onTheme,
-  theme,
-  paused,
-  onPause,
-  onLeaders,
-}: {
-  onClose: () => void;
-  statuses: ExchangeStatus[];
-  onCompare: () => void;
-  onExport: () => void;
-  onKeys: () => void;
-  onTheme: () => void;
-  theme: string;
-  paused: boolean;
-  onPause: () => void;
-  onLeaders: () => void;
-}) {
-  return (
-    <Dialog title="More" onClose={onClose}>
-      <div className="t-more">
-        <a className="t-more-item" href="/trade">
-          <strong>Paper & live trade desk</strong>
-          <span>Practise with paper trades or arm a real hedge around funding</span>
-        </a>
-        <a className="t-more-item" href="/backtest">
-          <strong>Backtest</strong>
-          <span>Would catching each settlement have paid over the last month?</span>
-        </a>
-        <a className="t-more-item" href="/performance">
-          <strong>Performance</strong>
-          <span>Results of every paper and live trade, predicted vs actual</span>
-        </a>
-        <button type="button" className="t-more-item" onClick={onCompare}>
-          <strong>Compare a coin</strong>
-          <span>Every exchange side by side for one coin</span>
-        </button>
-        <button type="button" className="t-more-item" onClick={onLeaders}>
-          <strong>Funding leaders</strong>
-          <span>Highest and lowest rates on each exchange</span>
-        </button>
-        <a className="t-more-item" href={TELEGRAM_BOT_URL} target="_blank" rel="noreferrer">
-          <strong>Telegram bot</strong>
-          <span>Alerts and /coin, /compare commands in Telegram</span>
-        </a>
-        <button type="button" className="t-more-item" onClick={onExport}>
-          <strong>Export CSV</strong>
-          <span>Download the pairs you're viewing</span>
-        </button>
-        <button type="button" className="t-more-item" onClick={onPause}>
-          <strong>{paused ? "Resume live updates" : "Pause live updates"}</strong>
-          <span>{paused ? "Numbers are frozen right now" : "Freeze the numbers while you read"}</span>
-        </button>
-        <button type="button" className="t-more-item" onClick={onTheme}>
-          <strong>{theme === "dark" ? "Light theme" : "Dark theme"}</strong>
-          <span>Switch the look</span>
-        </button>
-        <button type="button" className="t-more-item" onClick={onKeys}>
-          <strong>Exchange API keys</strong>
-          <span>Admin: fee tier and CoinSwitch access</span>
-        </button>
-      </div>
-      <h3 className="t-subhead" style={{ marginTop: 18 }}>
-        Exchange feeds
-      </h3>
-      <FeedsPanel statuses={statuses} />
-    </Dialog>
-  );
-}
-

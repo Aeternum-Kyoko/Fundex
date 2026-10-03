@@ -20,7 +20,7 @@ import {
 import type { ArbitrageOpportunity, ExchangeName } from "../lib/types";
 import { whoPays } from "../terminal/capture";
 import { Dialog } from "../terminal/panels";
-import { Countdown } from "../terminal/primitives";
+import { clockTime, Countdown } from "../terminal/primitives";
 import type {
   TradeCredentialInput,
   TradeCredentialVerificationResponse,
@@ -498,7 +498,7 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
     reverse: true,
     strategy,
   });
-  const { session, history, loading: sessionLoading, error: sessionError, createSession, cancelSession, clearHistory } = useTradeSession(canonicalSymbol);
+  const { session, history, loading: sessionLoading, error: sessionError, createSession, cancelSession } = useTradeSession(canonicalSymbol);
 
   const activePlan = scenario === "reverse" ? reversePlan : bestPlan;
   const planLoading = scenario === "reverse" ? reversePlanLoading : bestPlanLoading;
@@ -614,10 +614,31 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
     setVerification({ status: "idle", message: null, checkedAt: null, results: null });
   }, [paperTradingEnabled, requiredExchanges.join(","), JSON.stringify(liveCredentialPayload)]);
 
-  const localTradeHistory = useMemo(
-    () => history.filter((item) => item.canonical_symbol.toUpperCase() === canonicalSymbol.toUpperCase()),
-    [canonicalSymbol, history],
-  );
+  // The server journal is the source of truth: browser-stored copies go stale (an "armed" trade that
+  // later completed would stay "armed"). Anything only stored locally is kept as a fallback.
+  const [journal, setJournal] = useState<TradeSessionResponse[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    const load = () =>
+      fetch(`${API_BASE}/trade/journal?limit=200`)
+        .then((response) => (response.ok ? response.json() : []))
+        .then((rows: TradeSessionResponse[]) => !cancelled && setJournal(rows))
+        .catch(() => undefined);
+    void load();
+    const timer = window.setInterval(load, 10_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+  const localTradeHistory = useMemo(() => {
+    const merged = new Map<string, TradeSessionResponse>();
+    for (const item of history) merged.set(item.id, item);
+    for (const item of journal) merged.set(item.id, item);
+    return [...merged.values()]
+      .filter((item) => item.canonical_symbol.toUpperCase() === canonicalSymbol.toUpperCase())
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
+  }, [canonicalSymbol, history, journal]);
   const reportSessions = useMemo(() => {
     const next = new Map<string, TradeSessionResponse>();
     if (session) {
@@ -776,7 +797,7 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
   const steps: Array<{ key: string; label: string; at: string | null }> = [
     { key: "armed", label: "Armed", at: session?.created_at ?? null },
     { key: "entering", label: "Enter", at: session?.scheduled_entry_at ?? scheduledEntryAt },
-    { key: "settle", label: "Funding settles", at: session?.pair_funding_time ?? settlementAt },
+    { key: "settle", label: "Settles", at: session?.pair_funding_time ?? settlementAt },
     { key: "exiting", label: "Exit", at: session?.scheduled_exit_at ?? scheduledExitAt },
     { key: "completed", label: "Result", at: null },
   ];
@@ -848,9 +869,9 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
                 </span>
               </div>
               <dl className="td-clock-facts">
-                <div><dt>Enter in</dt><dd className="t-num"><Countdown target={session?.scheduled_entry_at ?? scheduledEntryAt} /></dd></div>
-                <div><dt>Exit in</dt><dd className="t-num"><Countdown target={session?.scheduled_exit_at ?? scheduledExitAt} /></dd></div>
-                <div><dt>Cancel locks in</dt><dd className="t-num"><Countdown target={session?.cancellable_until ?? cancelLockAt} /></dd></div>
+                <div><dt>Enter in</dt><dd className="t-num"><Countdown target={session?.scheduled_entry_at ?? scheduledEntryAt} doneLabel="now" /></dd></div>
+                <div><dt>Exit in</dt><dd className="t-num"><Countdown target={session?.scheduled_exit_at ?? scheduledExitAt} doneLabel="now" /></dd></div>
+                <div><dt>Cancel allowed for</dt><dd className="t-num"><Countdown target={session?.cancellable_until ?? cancelLockAt} doneLabel="locked" /></dd></div>
               </dl>
             </div>
             <ol className="td-steps" aria-label="Trade timeline">
@@ -859,7 +880,7 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
                   <i aria-hidden="true" />
                   <span>{step.label}</span>
                   <small className="t-num">
-                    {step.at ? new Date(step.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : index === 4 && session?.realized_net_pnl_usd != null ? money(session.realized_net_pnl_usd) : ""}
+                    {step.at ? clockTime(step.at) : index === 4 && session?.realized_net_pnl_usd != null ? money(session.realized_net_pnl_usd) : ""}
                   </small>
                 </li>
               ))}
@@ -1065,11 +1086,8 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
 
       <section className="t-panel td-section td-history">
         <h3>
-          {symbolBase} trades on this device
-          <span style={{ display: "flex", gap: 8 }}>
-            <a className="t-text-btn" style={{ height: 32, display: "inline-flex", alignItems: "center", textDecoration: "none" }} href="/performance">All results</a>
-            {localTradeHistory.length ? <button type="button" className="t-text-btn" style={{ height: 32 }} onClick={clearHistory}>Clear</button> : null}
-          </span>
+          {symbolBase} trades
+          <a className="t-text-btn" style={{ height: 32, display: "inline-flex", alignItems: "center", textDecoration: "none" }} href="/performance">All results</a>
         </h3>
         {localTradeHistory.length ? (
           <ul className="t-list">
