@@ -50,6 +50,11 @@ export function HeatmapView({ rates, exchanges, onOpen }: { rates: RateMap; exch
           </select>
         </label>
       </div>
+      <div className="hm-legend" aria-hidden="true">
+        <span>Longs collect</span>
+        <i />
+        <span>Shorts collect</span>
+      </div>
       <div className="hm-scroll">
         <div className="hm-grid" role="table" style={{ gridTemplateColumns: `minmax(72px, 0.9fr) repeat(${columns.length}, minmax(64px, 1fr)) minmax(64px, 0.8fr)` }}>
           <span className="hm-head hm-sticky" role="columnheader">Coin</span>

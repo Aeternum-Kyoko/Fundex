@@ -495,7 +495,7 @@ export function Terminal() {
             data ? <HeatmapView rates={data.rates ?? {}} exchanges={active} onOpen={open} /> : <SkeletonRows count={10} height={40} label="Loading heatmap" />
           ) : null}
           {tab === "calendar" ? (
-            data ? <CalendarView rates={data.rates ?? {}} exchanges={active} onOpen={open} /> : <SkeletonRows count={6} height={48} label="Loading calendar" />
+            data ? <CalendarView rates={data.rates ?? {}} exchanges={active} opportunities={opportunities} onOpen={open} /> : <SkeletonRows count={6} height={48} label="Loading calendar" />
           ) : null}
           {tab === "trends" ? <TrendsView opportunities={opportunities} leaders={data?.leaders ?? []} exchanges={active} onOpen={open} /> : null}
           {tab === "settlements" ? <SettlementsView items={data?.settlements ?? []} onOpen={open} loading={!data} /> : null}

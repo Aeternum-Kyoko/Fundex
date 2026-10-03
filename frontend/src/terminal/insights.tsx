@@ -111,6 +111,29 @@ function duration(hours: number) {
   return `${(hours / 24).toFixed(1)} days`;
 }
 
+/** One thin bar per slice of the window: tall when the spread was wide, green when it cleared break-even. */
+function SpreadStrip({ points, threshold }: { points: OpportunityHistoryPoint[]; threshold: number }) {
+  const bars = useMemo(() => {
+    const ordered = [...points].sort((a, b) => a.recorded_at.localeCompare(b.recorded_at)).map((point) => point.spread_rate * 100);
+    const size = Math.max(1, Math.ceil(ordered.length / 48));
+    const out: number[] = [];
+    for (let index = 0; index < ordered.length; index += size) {
+      const slice = ordered.slice(index, index + size);
+      out.push(slice.reduce((sum, value) => sum + value, 0) / slice.length);
+    }
+    return out;
+  }, [points]);
+  const top = Math.max(threshold * 1.5, ...bars, 1e-9);
+  return (
+    <div className="ps-strip" role="img" aria-label="Spread over the observed window against break-even">
+      {bars.map((value, index) => (
+        <i key={index} data-ok={value >= threshold} style={{ height: `${Math.max(6, (Math.max(value, 0) / top) * 100)}%` }} />
+      ))}
+      <span className="ps-strip-line" style={{ bottom: `${(threshold / top) * 100}%` }} />
+    </div>
+  );
+}
+
 export function PersistenceBlock({ opportunity, points }: { opportunity: ArbitrageOpportunity; points: OpportunityHistoryPoint[] }) {
   const threshold = breakEvenSpread(opportunity);
   const stats = useMemo(() => analyseSpread(points, threshold), [points, threshold]);
@@ -133,6 +156,7 @@ export function PersistenceBlock({ opportunity, points }: { opportunity: Arbitra
         <span className="t-num">{pct(stats.average, 4)}</span> /8h, {stats.stability}
         {stats.trend !== "steady" ? `, ${stats.trend}` : ""}.
       </p>
+      <SpreadStrip points={points} threshold={threshold} />
       <dl className="t-kv">
         <div>
           <dt>Time above break-even ({pct(stats.threshold, 4)} /8h)</dt>
@@ -270,7 +294,7 @@ export function DepthBlock({ symbol, longExchange, shortExchange }: { symbol: st
           Biggest trade this pair takes under 0.1% slippage per side: <strong className="t-num">{formatUsd(tradeLimit)}</strong>
         </p>
       ) : null}
-      <div className="dp-grid" role="table" style={{ gridTemplateColumns: `minmax(86px, 1.1fr) repeat(${sizes.length}, minmax(34px, 1fr))` }}>
+      <div className="dp-grid" role="table" style={{ gridTemplateColumns: `minmax(100px, 1.3fr) repeat(${sizes.length}, minmax(34px, 1fr))` }}>
         <span className="dp-head" role="columnheader">Exchange</span>
         {sizes.map((size) => (
           <span key={size} className="dp-head t-num" role="columnheader">
@@ -294,7 +318,7 @@ function DepthRowView({ row, mark }: { row: DepthRow; mark: string }) {
     <>
       <span className="dp-name" role="rowheader">
         <ExchangeTag exchange={row.exchange} />
-        {mark ? <em>{mark === "L" ? "long" : "short"}</em> : null}
+        {mark ? <em title={mark === "L" ? "Your long leg" : "Your short leg"}>{mark}</em> : null}
       </span>
       {row.sizes.map((entry) => {
         const worst = entry.buy_percent == null || entry.sell_percent == null ? null : Math.max(entry.buy_percent, entry.sell_percent);
