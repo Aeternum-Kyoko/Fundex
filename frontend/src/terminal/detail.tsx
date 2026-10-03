@@ -128,9 +128,11 @@ function SettlementTimeline({ opportunity }: { opportunity: ArbitrageOpportunity
     [opportunity, minuteNow, windowMs],
   );
   const total = events.reduce((sum, event) => sum + event.amount, 0);
+  // Hourly coins pay 24 times a day: labels would overprint, so show dots and the count instead.
+  const dense = events.length > 10;
   return (
     <>
-      <div className="t-timeline" aria-label="Settlements in the next 24 hours">
+      <div className="t-timeline" data-dense={dense || undefined} aria-label="Settlements in the next 24 hours">
         <div className="t-timeline-axis" />
         {events.map((event) => (
           <span
@@ -148,7 +150,7 @@ function SettlementTimeline({ opportunity }: { opportunity: ArbitrageOpportunity
       <div className="t-timeline-scale">
         <span>Now</span>
         <span className="t-num">
-          24h total <span className={total >= 0 ? "t-receive" : "t-pay"}>{pct(total * 100, 4, true)}</span>
+          {dense ? `${events.length} payments, ` : ""}24h total <span className={total >= 0 ? "t-receive" : "t-pay"}>{pct(total * 100, 4, true)}</span>
         </span>
         <span>+24h</span>
       </div>

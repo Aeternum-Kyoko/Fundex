@@ -1,5 +1,5 @@
 /* Fundex service worker: the app shell works offline, live data never comes from a cache. */
-const VERSION = "fundex-v2";
+const VERSION = "fundex-v4";
 const SHELL = ["/", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/favicon.svg"];
 
 self.addEventListener("install", (event) => {
@@ -13,6 +13,13 @@ self.addEventListener("activate", (event) => {
       .then((keys) => Promise.all(keys.filter((key) => key !== VERSION).map((key) => caches.delete(key))))
       .then(() => self.clients.claim()),
   );
+});
+
+// The page tells us which built files it loaded, so the very first visit is already available offline.
+self.addEventListener("message", (event) => {
+  if (!event.data || event.data.type !== "precache") return;
+  const urls = (event.data.urls || []).filter((url) => url.startsWith(self.location.origin + "/assets/"));
+  event.waitUntil(caches.open(VERSION).then((cache) => Promise.all(urls.map((url) => cache.add(url).catch(() => undefined)))));
 });
 
 self.addEventListener("fetch", (event) => {
@@ -37,7 +44,7 @@ self.addEventListener("fetch", (event) => {
 
   // Built assets have hashed names: serve from cache, refresh in the background.
   event.respondWith(
-    caches.match(request).then((cached) => {
+    caches.match(request, { ignoreVary: true }).then((cached) => {
       const fresh = fetch(request)
         .then((response) => {
           if (response.ok) caches.open(VERSION).then((cache) => cache.put(request, response.clone()));

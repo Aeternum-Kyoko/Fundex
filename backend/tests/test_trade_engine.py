@@ -273,3 +273,102 @@ def test_recent_settled_funding_reads_binance_history():
     rows = asyncio.run(resolver.recent("binance", "BTCUSDT", 8, None, 2))
     assert [rate for _, rate in rows] == [0.0001, 0.0003]
     assert asyncio.run(resolver.recent("wazirx", "BTC", 8, None, 2)) == []
+
+
+class LiveSafetyTests(unittest.TestCase):
+    """The failure paths that decide whether real money is left exposed."""
+
+    def _manager_and_record(self):
+        manager = TradeManager(isolated_settings(), MarketStore())
+        response = session("entered", mode="live")
+        plan = SimpleNamespace(long_leg=leg_plan("delta", "buy"), short_leg=leg_plan("binance", "sell"))
+        snapshots = {name: make_snapshot(exchange=name) for name in ("delta", "binance")}
+        record = SimpleNamespace(
+            response=response,
+            plan=plan,
+            long_snapshot=snapshots["delta"],
+            short_snapshot=snapshots["binance"],
+            credentials={"delta": object(), "binance": object()},
+        )
+        events: list[str] = []
+
+        async def get_record(session_id: str):
+            return record
+
+        async def append_event(session_id: str, phase: str, message: str, level: str = "info") -> None:
+            events.append(f"{phase}:{message}")
+
+        async def apply_response(session_id: str, leg_name: str, payload: dict, status: str, exit_order: bool = False) -> None:
+            leg = response.long_leg if leg_name == "long" else response.short_leg
+            if not exit_order:
+                leg.entry_order_id = payload["id"]
+
+        manager._get_record = get_record  # type: ignore[assignment]
+        manager._append_event = append_event  # type: ignore[assignment]
+        manager._apply_order_response = apply_response  # type: ignore[assignment]
+        return manager, record, events
+
+    def test_a_failed_entry_leg_closes_the_leg_that_did_fill(self) -> None:
+        manager, record, events = self._manager_and_record()
+        closed: list[str] = []
+
+        async def live_leg(rec, leg_name: str, *, is_exit: bool) -> dict:
+            if leg_name == "short":
+                raise RuntimeError("exchange rejected the order")
+            return {"id": "order-long"}
+
+        async def submit(*, snapshot, credential, leg, leverage, is_exit):
+            closed.append(f"{snapshot.exchange}:{'exit' if is_exit else 'entry'}")
+            return {}
+
+        manager._live_leg = live_leg  # type: ignore[assignment]
+        manager._submit_live_order = submit  # type: ignore[assignment]
+
+        with self.assertRaises(RuntimeError) as raised:
+            asyncio.run(manager._execute_live_entry("s"))
+        self.assertIn("emergency close", str(raised.exception))
+        self.assertIn("short: exchange rejected the order", str(raised.exception))
+        self.assertEqual(closed, ["delta:exit"])
+        self.assertTrue(any(event.startswith("recovery:") for event in events))
+        asyncio.run(manager.client.aclose())
+
+    def test_a_leg_that_never_filled_is_not_closed(self) -> None:
+        manager, record, _ = self._manager_and_record()
+        submitted: list[str] = []
+
+        async def submit(**kwargs):
+            submitted.append("called")
+
+        manager._submit_live_order = submit  # type: ignore[assignment]
+        # No entry order id was ever recorded, so there is nothing to close.
+        asyncio.run(manager._attempt_emergency_close(record, "long"))
+        self.assertEqual(submitted, [])
+        asyncio.run(manager.client.aclose())
+
+    def test_exit_retries_three_times_then_says_which_leg_is_still_open(self) -> None:
+        import app.services.trade_manager as tm
+
+        manager, record, _ = self._manager_and_record()
+        attempts = {"long": 0, "short": 0}
+
+        async def live_leg(rec, leg_name: str, *, is_exit: bool) -> dict:
+            attempts[leg_name] += 1
+            if leg_name == "short":
+                raise RuntimeError("timeout")
+            return {"id": "closed-long"}
+
+        async def no_sleep(seconds: float) -> None:
+            return None
+
+        manager._live_leg = live_leg  # type: ignore[assignment]
+        original_sleep = tm.asyncio.sleep
+        tm.asyncio.sleep = no_sleep  # type: ignore[assignment]
+        try:
+            with self.assertRaises(RuntimeError) as raised:
+                asyncio.run(manager._execute_live_exit("s"))
+        finally:
+            tm.asyncio.sleep = original_sleep  # type: ignore[assignment]
+        self.assertEqual(attempts, {"long": 1, "short": 3})
+        self.assertIn("short leg", str(raised.exception))
+        self.assertIn("STILL OPEN", str(raised.exception))
+        asyncio.run(manager.client.aclose())

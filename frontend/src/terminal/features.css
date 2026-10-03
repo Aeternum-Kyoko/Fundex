@@ -149,3 +149,6 @@
 .sb-verdict[data-tone="pass"] { background: var(--t-receive-bg); color: var(--t-receive); }
 .sb-verdict[data-tone="warn"] { background: var(--t-amber-bg); color: var(--t-amber); }
 .sb-verdict[data-tone="fail"] { background: var(--t-pay-bg); color: var(--t-pay); }
+
+.t-timeline[data-dense="true"] .t-tick > span { display: none; }
+.t-timeline[data-dense="true"] .t-tick i { opacity: 0.85; }

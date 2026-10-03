@@ -33,6 +33,7 @@ interface State {
   progress: number;
   total: number;
   message: string;
+  params?: Record<string, number>;
   result: Result | null;
 }
 
@@ -87,6 +88,7 @@ export function Backtest() {
   const [result, setResult] = useState<Result | null>(null);
   const [error, setError] = useState<string | null>(null);
   const debounce = useRef<number | null>(null);
+  const resultSeen = useRef(false);
 
   // Poll the job while it runs.
   useEffect(() => {
@@ -97,7 +99,12 @@ export function Backtest() {
         const next = (await fetch(`${API_BASE}/backtest`).then((response) => response.json())) as State;
         if (cancelled) return;
         setState(next);
-        if (next.result && next.status === "done") setResult((current) => current ?? next.result);
+        if (next.result && next.status === "done") {
+          // First load after a run: show the settings that produced this result, not the form defaults.
+          if (!resultSeen.current && next.params && Object.keys(next.params).length) setParams({ ...DEFAULTS, ...(next.params as Partial<Params>) });
+          resultSeen.current = true;
+          setResult((current) => current ?? next.result);
+        }
         if (next.status === "running") timer = window.setTimeout(poll, 1500);
       } catch {
         if (!cancelled) setError("Can't reach the backtest service.");
@@ -220,7 +227,7 @@ export function Backtest() {
           <section className="t-perf-kpis" style={{ marginTop: 16 }} aria-label="Result">
             <div className="t-perf-lead">
               <span className="t-soft">
-                Net over {params.days} days at ${params.notional_usd.toLocaleString()} per leg
+                Net over {Math.max(1, Math.round((new Date(result.period_end).getTime() - new Date(result.period_start).getTime()) / 86_400_000))} days at ${params.notional_usd.toLocaleString()} per leg
               </span>
               <strong className={`t-num ${tone(result.total_net_usd)}`}>{usd(result.total_net_usd)}</strong>
               <span className="t-soft t-num">

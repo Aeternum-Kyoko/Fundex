@@ -71,6 +71,13 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
 // Offline-capable shell, so Fundex opens instantly once installed. Live data is never cached.
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+    navigator.serviceWorker
+      .register("/sw.js")
+      .then(() => navigator.serviceWorker.ready)
+      .then((registration) => {
+        const urls = performance.getEntriesByType("resource").map((entry) => entry.name).filter((name) => name.includes("/assets/"));
+        registration.active?.postMessage({ type: "precache", urls });
+      })
+      .catch(() => undefined);
   });
 }
