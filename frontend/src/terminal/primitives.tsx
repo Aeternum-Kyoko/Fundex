@@ -239,6 +239,12 @@ export const Icon = {
       <path d="M4 9l3-3 3 3M14 15l3 3 3-3" />
     </svg>
   ),
+  exchange: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 9.5 12 4l9 5.5" />
+      <path d="M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3.5 20.5h17" />
+    </svg>
+  ),
   more: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
       <path d="M4 7h16M4 12h16M4 17h10" />

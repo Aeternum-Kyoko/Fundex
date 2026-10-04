@@ -34,6 +34,8 @@ class StrategyParams:
     entry_apr_percent: float = 20.0  # open when the expected spread is at least this, annualised
     exit_apr_percent: float = 5.0  # close when it falls below this in the held direction
     max_positions: int = 5
+    # Decide just before each settlement on the exchanges' predicted rate instead of right after it.
+    use_predicted: bool = False
 
 
 @dataclass
@@ -72,6 +74,24 @@ def build_events(series: list[CoinSeries], lookback: int) -> list[Event]:
     return events
 
 
+def predicted_events(events: list[Event]) -> list[Event]:
+    """Each settlement paired with the signal as it will stand after the coin's NEXT settlement.
+
+    That is what deciding a few minutes before a settlement on the exchanges' predicted rate gives, assuming the
+    prediction is right. Binance's matched the settled rate exactly for ~80% of contracts in a check, so a replay
+    on this is an upper bound; the live bot records how often its predictions were right.
+    """
+    by_coin: dict[int, list[Event]] = {}
+    for event in events:
+        by_coin.setdefault(event.coin, []).append(event)
+    shifted: list[Event] = []
+    for coin_events in by_coin.values():
+        for current, upcoming in zip(coin_events, coin_events[1:]):
+            shifted.append(Event(current.moment, current.coin, current.binance, current.delta, upcoming.signal_apr))
+    shifted.sort(key=lambda event: (event.moment, event.coin))
+    return shifted
+
+
 def latest_signals(events: list[Event], series: list[CoinSeries], now: int, max_age_hours: float = 9.0) -> dict[str, float]:
     """Each coin's signal as of its most recent settlement, keyed by canonical symbol. Stale coins are left out."""
     signals: dict[str, tuple[int, float]] = {}
@@ -104,9 +124,26 @@ def _day(moment: int) -> str:
     return datetime.fromtimestamp(moment, timezone.utc).strftime("%Y-%m-%d")
 
 
-def run_carry(series: list[CoinSeries], events: list[Event], params: StrategyParams, start: int, end: int, detail: bool = True) -> dict:
-    """Replay the carry rules over [start, end]. With detail=False only the totals are returned (for the optimizer)."""
-    half_cost = cost_percent(params.binance_taker_bps, params.delta_taker_bps, params.slippage_percent_per_leg) / 2 / 100
+def run_carry(
+    series: list[CoinSeries],
+    events: list[Event],
+    params: StrategyParams,
+    start: int,
+    end: int,
+    detail: bool = True,
+    coin_slippage: dict[str, float] | None = None,
+) -> dict:
+    """Replay the carry rules over [start, end]. With detail=False only the totals are returned (for the optimizer).
+
+    coin_slippage: measured slippage per leg, in + out (%), by canonical symbol; others use the flat setting.
+    """
+    flat_half_cost = cost_percent(params.binance_taker_bps, params.delta_taker_bps, params.slippage_percent_per_leg) / 2 / 100
+    half_costs = [
+        cost_percent(params.binance_taker_bps, params.delta_taker_bps, coin_slippage[coin.canonical_symbol]) / 2 / 100
+        if coin_slippage and coin.canonical_symbol in coin_slippage
+        else flat_half_cost
+        for coin in series
+    ]
     notional = params.notional_usd
     held: dict[int, dict] = {}
     qualifying: dict[int, float] = {}
@@ -125,8 +162,8 @@ def run_carry(series: list[CoinSeries], events: list[Event], params: StrategyPar
     def close(coin: int, moment: int, open_at_end: bool = False) -> None:
         nonlocal cost_total
         position = held.pop(coin)
-        cost_total += half_cost * notional
-        book(moment, -half_cost * notional)
+        cost_total += half_costs[coin] * notional
+        book(moment, -half_costs[coin] * notional)
         closed.append({**position, "exited": moment, "open_at_end": open_at_end})
 
     index = 0
@@ -194,8 +231,8 @@ def run_carry(series: list[CoinSeries], events: list[Event], params: StrategyPar
                     "funding_usd": 0.0,
                     "settlements": 0,
                 }
-                cost_total += half_cost * notional
-                book(moment, -half_cost * notional)
+                cost_total += half_costs[coin] * notional
+                book(moment, -half_costs[coin] * notional)
 
     slot_seconds += len(held) * max(end - previous_moment, 0)
     for coin in list(held):
@@ -216,8 +253,10 @@ def run_carry(series: list[CoinSeries], events: list[Event], params: StrategyPar
     if not detail:
         return summary
 
-    cost_per_trade = 2 * half_cost * notional
-    wins = sum(1 for trade in closed if trade["funding_usd"] - cost_per_trade > 0)
+    def trade_cost(trade: dict) -> float:
+        return 2 * half_costs[trade["coin"]] * notional
+
+    wins = sum(1 for trade in closed if trade["funding_usd"] - trade_cost(trade) > 0)
     hours = [(trade["exited"] - trade["entered"]) / 3600 for trade in closed]
 
     running = peak = drawdown = 0.0
@@ -234,7 +273,7 @@ def run_carry(series: list[CoinSeries], events: list[Event], params: StrategyPar
         entry = by_coin.setdefault(name, {"coin": name, "trades": 0, "net_usd": 0.0, "funding_usd": 0.0, "hours": 0.0})
         entry["trades"] += 1
         entry["funding_usd"] += trade["funding_usd"]
-        entry["net_usd"] += trade["funding_usd"] - cost_per_trade
+        entry["net_usd"] += trade["funding_usd"] - trade_cost(trade)
         entry["hours"] += (trade["exited"] - trade["entered"]) / 3600
 
     def trade_row(trade: dict) -> dict:
@@ -247,7 +286,7 @@ def run_carry(series: list[CoinSeries], events: list[Event], params: StrategyPar
             "settlements": trade["settlements"],
             "entry_apr": trade["entry_apr"],
             "funding_usd": trade["funding_usd"],
-            "net_usd": trade["funding_usd"] - cost_per_trade,
+            "net_usd": trade["funding_usd"] - trade_cost(trade),
             "open_at_end": trade["open_at_end"],
         }
 
@@ -255,7 +294,7 @@ def run_carry(series: list[CoinSeries], events: list[Event], params: StrategyPar
         **summary,
         "period_start": datetime.fromtimestamp(start, timezone.utc).isoformat(),
         "period_end": datetime.fromtimestamp(end, timezone.utc).isoformat(),
-        "cost_per_trade_usd": cost_per_trade,
+        "cost_per_trade_usd": cost_total / len(closed) if closed else 2 * flat_half_cost * notional,
         "win_rate": wins / len(closed) if closed else 0.0,
         "avg_hold_hours": sum(hours) / len(hours) if hours else 0.0,
         "avg_settlements": sum(trade["settlements"] for trade in closed) / len(closed) if closed else 0.0,
@@ -268,19 +307,22 @@ def run_carry(series: list[CoinSeries], events: list[Event], params: StrategyPar
     }
 
 
-def run_lab(series: list[CoinSeries], params: StrategyParams, start: int, end: int) -> dict:
+def run_lab(series: list[CoinSeries], params: StrategyParams, start: int, end: int, coin_slippage: dict[str, float] | None = None) -> dict:
     """Your rules, the snipe baseline, a walk-forward threshold search and the levers that move the result most."""
-    events_cache: dict[int, list[Event]] = {}
+    events_cache: dict[tuple[int, bool], list[Event]] = {}
 
-    def events_for(lookback: int) -> list[Event]:
-        if lookback not in events_cache:
-            events_cache[lookback] = build_events(series, lookback)
-        return events_cache[lookback]
+    def events_for(lookback: int, use_predicted: bool) -> list[Event]:
+        key = (lookback, use_predicted)
+        if key not in events_cache:
+            settled = events_cache.get((lookback, False)) or build_events(series, lookback)
+            events_cache[(lookback, False)] = settled
+            events_cache[key] = predicted_events(settled) if use_predicted else settled
+        return events_cache[key]
 
     def quick(changed: StrategyParams, window_start: int = start, window_end: int = end) -> dict:
-        return run_carry(series, events_for(changed.lookback), changed, window_start, window_end, detail=False)
+        return run_carry(series, events_for(changed.lookback, changed.use_predicted), changed, window_start, window_end, detail=False, coin_slippage=coin_slippage)
 
-    yours = run_carry(series, events_for(params.lookback), params, start, end)
+    yours = run_carry(series, events_for(params.lookback, params.use_predicted), params, start, end, coin_slippage=coin_slippage)
 
     snipe = simulate(
         series,
@@ -358,6 +400,15 @@ def run_lab(series: list[CoinSeries], params: StrategyParams, start: int, end: i
             replace(params, max_positions=params.max_positions * 2),
         ),
     ]
+    if not params.use_predicted:
+        levers.append(
+            lever(
+                "predicted",
+                "Enter on predicted rates",
+                "Decide a few minutes before each settlement on the exchanges' predicted rate, so a big payment is caught and a bad one avoided (assumes the prediction is right)",
+                replace(params, use_predicted=True),
+            )
+        )
     for lookback in (1, 6):
         if lookback != params.lookback:
             speed = "Faster" if lookback < params.lookback else "Slower"
@@ -374,6 +425,7 @@ def run_lab(series: list[CoinSeries], params: StrategyParams, start: int, end: i
     return {
         "params": params.__dict__.copy(),
         "coins": len(series),
+        "measured_slippage_coins": len(coin_slippage or {}),
         "strategy": yours,
         "snipe": {
             "net_usd": snipe["total_net_usd"],

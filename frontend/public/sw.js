@@ -1,5 +1,5 @@
 /* Fundex service worker: the app shell works offline, live data never comes from a cache. */
-const VERSION = "fundex-v4";
+const VERSION = "fundex-v5";
 const SHELL = ["/", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/favicon.svg"];
 
 self.addEventListener("install", (event) => {
@@ -34,7 +34,7 @@ self.addEventListener("fetch", (event) => {
       fetch(request)
         .then((response) => {
           const copy = response.clone();
-          caches.open(VERSION).then((cache) => cache.put("/", copy));
+          event.waitUntil(caches.open(VERSION).then((cache) => cache.put("/", copy)));
           return response;
         })
         .catch(() => caches.match("/").then((cached) => cached || Response.error())),
@@ -47,7 +47,11 @@ self.addEventListener("fetch", (event) => {
     caches.match(request, { ignoreVary: true }).then((cached) => {
       const fresh = fetch(request)
         .then((response) => {
-          if (response.ok) caches.open(VERSION).then((cache) => cache.put(request, response.clone()));
+          if (response.ok) {
+            // Clone now: once the page starts reading the body, a later clone() throws "body is already used".
+            const copy = response.clone();
+            event.waitUntil(caches.open(VERSION).then((cache) => cache.put(request, copy)));
+          }
           return response;
         })
         .catch(() => cached);

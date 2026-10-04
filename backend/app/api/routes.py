@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import replace
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Request
@@ -27,7 +28,8 @@ from app.models.trade import (
 )
 from app.services.arbitrage import build_opportunities
 from app.services.backtest import BacktestParams
-from app.services.strategy import StrategyParams, run_lab
+from app.services.exchange_profiles import coin_row, exchange_summary
+from app.services.strategy import StrategyParams, build_events, predicted_events, run_carry, run_lab
 from app.services.execution import build_execution_plan, reverse_opportunity
 from app.services.funding_leaders import build_funding_leaders
 from app.services.liquidity import depth_profile
@@ -523,6 +525,13 @@ class StrategyRequest(BaseModel):
     entry_apr_percent: float = Field(20, ge=0, le=1000)
     exit_apr_percent: float = Field(5, ge=-500, le=1000)
     max_positions: int = Field(5, ge=1, le=50)
+    use_predicted: bool = False
+    # Charge each coin the slippage its live order books show at this size, instead of the flat setting.
+    book_slippage: bool = False
+
+
+# Coins whose books are measured for one lab run: the ones the rules actually trade, capped.
+MAX_MEASURED_COINS = 80
 
 
 @router.post("/backtest/strategy")
@@ -536,9 +545,33 @@ async def backtest_strategy(request: Request, payload: StrategyRequest) -> dict:
         raise HTTPException(status_code=422, detail="The exit level must be below the entry level.")
     days = min(payload.days, backtest.history_days)
     end = int(datetime.now(timezone.utc).timestamp())
-    params = StrategyParams(**{**payload.model_dump(), "days": days})
+    start = end - days * 86400
+    params = StrategyParams(**{**payload.model_dump(exclude={"book_slippage"}), "days": days})
+    coin_slippage = None
+    if payload.book_slippage:
+        coin_slippage = await _measured_slippage(request, series, params, start, end)
     # The threshold search runs a few hundred replays; keep it off the event loop.
-    return await asyncio.to_thread(run_lab, series, params, end - days * 86400, end)
+    return await asyncio.to_thread(run_lab, series, params, start, end, coin_slippage)
+
+
+async def _measured_slippage(request: Request, series, params: StrategyParams, start: int, end: int) -> dict[str, float]:
+    # Which coins would trade: a quick replay of these rules (and the looser grid corner) on the flat cost.
+    traded: dict[str, int] = {}
+    for variant in (params, replace(params, entry_apr_percent=min(params.entry_apr_percent, 25), max_positions=params.max_positions * 2)):
+        events = build_events(series, variant.lookback)
+        if variant.use_predicted:
+            events = predicted_events(events)
+        for trade in run_carry(series, events, variant, start, end)["trades_list"]:
+            traded[trade["coin"]] = traded.get(trade["coin"], 0) + 1
+    wanted = {coin.canonical_symbol for coin in series if coin.base_asset in traded}
+    snapshots = await request.app.state.market_store.get_snapshots()
+    symbols = {(s.exchange, s.canonical_symbol): s.exchange_symbol for s in snapshots}
+    legs = {
+        canonical: (symbols[("binance", canonical)], symbols[("delta", canonical)])
+        for canonical in sorted(wanted, key=lambda c: -traded.get(c.split("-")[0], 0))[:MAX_MEASURED_COINS]
+        if ("binance", canonical) in symbols and ("delta", canonical) in symbols
+    }
+    return await request.app.state.book_costs.coin_slippage(legs, params.notional_usd)
 
 
 class StrategyBotRequest(BaseModel):
@@ -546,6 +579,8 @@ class StrategyBotRequest(BaseModel):
     mode: str = "paper"
     leverage: float = Field(2, ge=1, le=10)
     params: StrategyRequest
+    execution: str = "maker_first"
+    maker_wait_seconds: float = Field(30, ge=0, le=120)
 
 
 @router.get("/strategy/bot")
@@ -560,7 +595,12 @@ async def strategy_bot_configure(request: Request, payload: StrategyBotRequest) 
         raise HTTPException(status_code=422, detail="The exit level must be below the entry level.")
     try:
         await request.app.state.strategy_bot.configure(
-            enabled=payload.enabled, mode=payload.mode, leverage=payload.leverage, params=StrategyParams(**payload.params.model_dump())
+            enabled=payload.enabled,
+            mode=payload.mode,
+            leverage=payload.leverage,
+            params=StrategyParams(**payload.params.model_dump(exclude={"book_slippage"})),
+            execution=payload.execution,
+            maker_wait_seconds=payload.maker_wait_seconds,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -599,3 +639,65 @@ async def get_trade_session(request: Request, session_id: str) -> TradeSessionRe
 @router.post("/trade/sessions/{session_id}/cancel", response_model=TradeSessionResponse)
 async def cancel_trade_session(request: Request, session_id: str) -> TradeSessionResponse:
     return await request.app.state.trade_manager.cancel_session(session_id)
+
+
+# Exchange pages. Last, so /exchanges/{exchange} can't shadow /exchanges/status and friends.
+
+async def _exchange_context(request: Request):
+    snapshots = await request.app.state.market_store.get_snapshots()
+    statuses = {status.exchange: status for status in await request.app.state.market_store.get_statuses()}
+    overrides = request.app.state.market_engine.ranking_context.taker_fee_overrides_bps
+    by_coin: dict[str, list] = {}
+    for snapshot in snapshots:
+        by_coin.setdefault(snapshot.canonical_symbol, []).append(snapshot)
+    return snapshots, statuses, overrides, by_coin
+
+
+@router.get("/exchanges")
+async def exchanges_overview(request: Request) -> dict:
+    """Every venue: health, coverage, fees (with where they came from), funding mood, size and live-trading support."""
+    snapshots, statuses, overrides, _ = await _exchange_context(request)
+    now = datetime.now(timezone.utc)
+    names = list(dict.fromkeys([*statuses, *(s.exchange for s in snapshots)]))
+    return {
+        "exchanges": [
+            exchange_summary(name, [s for s in snapshots if s.exchange == name], snapshots, statuses.get(name), overrides.get(name), now)
+            for name in names
+        ]
+    }
+
+
+@router.get("/exchanges/{exchange}")
+async def exchange_detail(request: Request, exchange: str) -> dict:
+    snapshots, statuses, overrides, by_coin = await _exchange_context(request)
+    mine = [s for s in snapshots if s.exchange == exchange]
+    if not mine and exchange not in statuses:
+        raise HTTPException(status_code=404, detail="Unknown exchange.")
+    now = datetime.now(timezone.utc)
+    return {
+        **exchange_summary(exchange, mine, snapshots, statuses.get(exchange), overrides.get(exchange), now),
+        "coin_rows": sorted((coin_row(s, by_coin, overrides.get(exchange)) for s in mine), key=lambda row: -abs(row["apr_percent"])),
+    }
+
+
+@router.get("/exchanges/{exchange}/coins/{canonical_symbol}")
+async def exchange_coin(request: Request, exchange: str, canonical_symbol: str) -> dict:
+    """One coin on one exchange: live numbers, the exchange's own contract specs, and the same coin elsewhere."""
+    snapshots, _, overrides, by_coin = await _exchange_context(request)
+    snapshot = next((s for s in snapshots if s.exchange == exchange and s.canonical_symbol == canonical_symbol), None)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="This coin isn't listed on that exchange right now.")
+    specs = await request.app.state.exchange_specs.for_symbol(exchange, snapshot.exchange_symbol)
+    elsewhere = sorted(
+        (coin_row(s, by_coin, overrides.get(s.exchange)) | {"exchange": s.exchange, "display_name": exchange_display_name(s.exchange)} for s in by_coin.get(canonical_symbol, [])),
+        key=lambda row: -row["apr_percent"],
+    )
+    extra = {key: value for key, value in snapshot.metadata.items() if isinstance(value, (int, float, str, bool)) and key not in {"source_quote_asset"}}
+    return {
+        **coin_row(snapshot, by_coin, overrides.get(exchange)),
+        "exchange": exchange,
+        "display_name": exchange_display_name(exchange),
+        "specs": specs,
+        "feed": extra,
+        "venues": elsewhere,
+    }

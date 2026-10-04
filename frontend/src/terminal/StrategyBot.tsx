@@ -12,10 +12,30 @@ export interface BotParams {
   entry_apr_percent: number;
   exit_apr_percent: number;
   max_positions: number;
+  use_predicted: boolean;
+  book_slippage?: boolean;
+}
+
+interface PredictionScore {
+  checked: number;
+  exact_share?: number;
+  close_share?: number;
+  mean_error_percent?: number;
+  right_side_share?: number | null;
 }
 
 interface BotState {
-  config: { enabled: boolean; mode: string; leverage: number; params: BotParams };
+  config: { enabled: boolean; mode: string; leverage: number; params: BotParams; execution: "maker_first" | "taker"; maker_wait_seconds: number };
+  predicted_coins: number;
+  predictions: { days: number; waiting: number; all: PredictionScore; binance: PredictionScore; delta: PredictionScore };
+  reality: {
+    trades: number;
+    assumed_cost_usd: number;
+    fees_usd: number | null;
+    slippage_usd: number | null;
+    price_drift_usd: number | null;
+    maker_fill_share: number | null;
+  };
   last_tick_at: string | null;
   next_tick_at: string | null;
   last_error: string | null;
@@ -66,19 +86,26 @@ function held(iso: string) {
   return hours >= 48 ? `${(hours / 24).toFixed(1)} days` : `${Math.max(0, Math.round(hours))}h`;
 }
 
-const RULE_KEYS: Array<keyof BotParams> = ["entry_apr_percent", "exit_apr_percent", "lookback", "max_positions", "notional_usd"];
+const RULE_KEYS: Array<keyof BotParams> = ["entry_apr_percent", "exit_apr_percent", "lookback", "max_positions", "notional_usd", "use_predicted"];
+
+function share(value: number | null | undefined) {
+  return value == null ? "—" : `${Math.round(value * 100)}%`;
+}
 
 /** The paper bot: runs the lab's rules on live settled funding and trades them on paper, every hour. */
 export function StrategyBot({ params }: { params: BotParams }) {
   const [state, setState] = useState<BotState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [execution, setExecution] = useState<"maker_first" | "taker">("maker_first");
 
   const load = useCallback(async () => {
     try {
       const response = await fetch(`${API_BASE}/strategy/bot`);
       if (!response.ok) throw new Error();
-      setState((await response.json()) as BotState);
+      const next = (await response.json()) as BotState;
+      setState(next);
+      if (next.config.enabled) setExecution(next.config.execution);
     } catch {
       setError("Can't reach the strategy bot.");
     }
@@ -105,12 +132,21 @@ export function StrategyBot({ params }: { params: BotParams }) {
     }
   };
 
-  const configure = (enabled: boolean, rules: BotParams) =>
-    call(enabled ? "start" : "stop", "/strategy/bot", { method: "PUT", body: JSON.stringify({ enabled, mode: "paper", leverage: state?.config.leverage ?? 2, params: rules }) });
+  const configure = (enabled: boolean, rules: BotParams, how: "maker_first" | "taker" = execution) =>
+    call(enabled ? "start" : "stop", "/strategy/bot", {
+      method: "PUT",
+      body: JSON.stringify({ enabled, mode: "paper", leverage: state?.config.leverage ?? 2, params: rules, execution: how, maker_wait_seconds: state?.config.maker_wait_seconds ?? 30 }),
+    });
+  const chooseExecution = (how: "maker_first" | "taker") => {
+    setExecution(how);
+    if (running) void configure(true, botRules ?? params, how);
+  };
 
   const running = state?.config.enabled ?? false;
   const botRules = state?.config.params;
-  const differs = !!botRules && RULE_KEYS.some((key) => botRules[key] !== params[key]);
+  const differs = !!botRules && RULE_KEYS.some((key) => (botRules[key] ?? false) !== (params[key] ?? false));
+  const predictions = state?.predictions;
+  const reality = state?.reality;
   const totals = state?.totals;
   const net = (totals?.closed_net_usd ?? 0) + (totals?.open_net_usd ?? 0);
 
@@ -144,9 +180,13 @@ export function StrategyBot({ params }: { params: BotParams }) {
       <p className="t-muted sl-note">
         {running && botRules ? (
           <>
-            Every hour, 2 minutes after settlement, it reads the settled rates for {state?.coins_tracked || "every"} Binance and Delta coins, credits funding to open
-            pairs, closes those below {botRules.exit_apr_percent}% a year and opens the widest above {botRules.entry_apr_percent}% (up to {botRules.max_positions} pairs of $
-            {botRules.notional_usd.toLocaleString()} per leg), with fills from the live order books. Same rules as the replay below.
+            Every hour, {botRules.use_predicted ? "4 minutes before settlement, it adds each exchange's predicted rate to" : "2 minutes after settlement, it reads"} the settled
+            rates for {state?.coins_tracked || "every"} Binance and Delta coins, credits funding to open pairs, closes those below {botRules.exit_apr_percent}% a year and
+            opens the widest above {botRules.entry_apr_percent}% (up to {botRules.max_positions} pairs of ${botRules.notional_usd.toLocaleString()} per leg).{" "}
+            {state?.config.execution === "maker_first"
+              ? `Orders rest as limit orders at the touch for ${state.config.maker_wait_seconds}s, then cross the book.`
+              : "Orders cross the book straight away."}{" "}
+            Same rules as the replay below.
           </>
         ) : (
           <>
@@ -157,6 +197,17 @@ export function StrategyBot({ params }: { params: BotParams }) {
       </p>
       {error ? <div className="t-banner" role="alert">{error}</div> : null}
       {state?.last_error ? <div className="t-banner" role="alert">Last check failed: {state.last_error}</div> : null}
+
+      <div className="sl-modes" style={{ marginTop: 0, marginBottom: 12 }}>
+        <div className="t-segmented" role="group" aria-label="Execution">
+          <button type="button" aria-pressed={execution === "maker_first"} disabled={!!busy} onClick={() => chooseExecution("maker_first")} title="Rest a limit order at the best price on our side; cross the book only if it hasn't filled">
+            Maker first
+          </button>
+          <button type="button" aria-pressed={execution === "taker"} disabled={!!busy} onClick={() => chooseExecution("taker")} title="Cross the book straight away (taker fee)">
+            Cross the book
+          </button>
+        </div>
+      </div>
 
       {state ? (
         <>
@@ -236,6 +287,67 @@ export function StrategyBot({ params }: { params: BotParams }) {
               {state.top_signals[0] ? ` (widest: ${state.top_signals[0].coin} at ${Math.abs(state.top_signals[0].signal_apr).toFixed(0)}%)` : ""}.
             </p>
           ) : null}
+
+          <div className="sb-columns">
+            <div>
+              <h4>Prediction accuracy, last {predictions?.days ?? 7} days</h4>
+              {predictions && predictions.all.checked ? (
+                <ul className="t-list">
+                  {(["binance", "delta"] as const).map((exchange) => {
+                    const score = predictions[exchange];
+                    return score.checked ? (
+                      <li key={exchange}>
+                        <span>
+                          {exchange === "binance" ? "Binance" : "Delta"}{" "}
+                          <span className="t-muted">
+                            {score.checked} settlements, {share(score.close_share)} within 0.005%, right side {share(score.right_side_share)}
+                          </span>
+                        </span>
+                        <span className="t-num">{share(score.exact_share)} exact</span>
+                      </li>
+                    ) : null;
+                  })}
+                </ul>
+              ) : (
+                <p className="t-muted sb-small">
+                  {botRules?.use_predicted
+                    ? `Every predicted rate the bot acts on is scored once the exchange publishes the settled one${predictions?.waiting ? ` (${predictions.waiting} waiting)` : ""}.`
+                    : "The bot decides on settled rates only, so it makes no predictions to score."}
+                </p>
+              )}
+            </div>
+            <div>
+              <h4>Paper vs the lab's assumptions, per round trip</h4>
+              {reality && reality.trades ? (
+                <ul className="t-list">
+                  <li>
+                    <span>Lab assumes (fees + flat slippage)</span>
+                    <span className="t-num">{usd(-reality.assumed_cost_usd)}</span>
+                  </li>
+                  <li>
+                    <span>
+                      Paper paid <span className="t-muted">fees + slippage, {reality.trades} closed</span>
+                    </span>
+                    <span className={`t-num ${(reality.fees_usd ?? 0) + (reality.slippage_usd ?? 0) > reality.assumed_cost_usd ? "t-pay" : "t-receive"}`}>
+                      {usd(-((reality.fees_usd ?? 0) + (reality.slippage_usd ?? 0)))}
+                    </span>
+                  </li>
+                  <li>
+                    <span>
+                      Price drift between the legs <span className="t-muted">not in the backtest</span>
+                    </span>
+                    <span className={`t-num ${tone(reality.price_drift_usd ?? 0)}`}>{usd(reality.price_drift_usd ?? 0)}</span>
+                  </li>
+                  <li>
+                    <span>Fills done as maker</span>
+                    <span className="t-num">{share(reality.maker_fill_share)}</span>
+                  </li>
+                </ul>
+              ) : (
+                <p className="t-muted sb-small">Once positions close, their real fees, slippage and price drift show here next to what the backtest assumes.</p>
+              )}
+            </div>
+          </div>
 
           {state.recent_closed.length || state.log.length ? (
             <div className="sb-columns">

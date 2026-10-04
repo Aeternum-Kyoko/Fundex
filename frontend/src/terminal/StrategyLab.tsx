@@ -14,6 +14,8 @@ interface Params {
   entry_apr_percent: number;
   exit_apr_percent: number;
   max_positions: number;
+  use_predicted: boolean;
+  book_slippage: boolean;
 }
 
 interface Trade {
@@ -73,6 +75,7 @@ interface Lever {
 interface Lab {
   params: Params;
   coins: number;
+  measured_slippage_coins: number;
   strategy: Strategy;
   snipe: { net_usd: number; trades: number; cost_percent: number; daily: Array<{ day: string; net_usd: number }> };
   optimizer: {
@@ -105,6 +108,8 @@ const DEFAULTS: Params = {
   entry_apr_percent: 20,
   exit_apr_percent: 5,
   max_positions: 5,
+  use_predicted: true,
+  book_slippage: false,
 };
 
 const PARAMS_KEY = "fundex-strategy-params";
@@ -421,8 +426,26 @@ export function StrategyLab() {
             <input type="number" step="0.01" min="0" value={params.slippage_percent_per_leg} onChange={number("slippage_percent_per_leg", 0)} />
           </label>
         </div>
+        <div className="sl-modes">
+          <div className="t-segmented" role="group" aria-label="Decide on">
+            <button type="button" aria-pressed={params.use_predicted} onClick={() => update({ use_predicted: true })} title="Decide a few minutes before each settlement, on the exchanges' predicted rate">
+              Predicted rates
+            </button>
+            <button type="button" aria-pressed={!params.use_predicted} onClick={() => update({ use_predicted: false })} title="Decide right after each settlement, on rates that have already settled">
+              Settled rates
+            </button>
+          </div>
+          <div className="t-segmented" role="group" aria-label="Slippage">
+            <button type="button" aria-pressed={!params.book_slippage} onClick={() => update({ book_slippage: false })}>
+              Flat slippage
+            </button>
+            <button type="button" aria-pressed={params.book_slippage} onClick={() => update({ book_slippage: true })} title="Charge each coin what its live order books cost at this size">
+              Live order books
+            </button>
+          </div>
+        </div>
         <p className="t-muted sl-rule">
-          In words: after each settlement, average the last {params.lookback} rate{params.lookback > 1 ? "s" : ""} on each exchange, annualise the gap, and open the{" "}
+          In words: {params.use_predicted ? "a few minutes before each settlement, add the exchanges' predicted rate," : "after each settlement,"} average the last {params.lookback} rate{params.lookback > 1 ? "s" : ""} on each exchange, annualise the gap, and open the{" "}
           {params.max_positions} widest pairs above {params.entry_apr_percent}% a year on the side that receives. Close a pair once its gap drops below{" "}
           {params.exit_apr_percent}% or flips.
         </p>
@@ -517,7 +540,7 @@ export function StrategyLab() {
                     <b className={`t-num ${tone(lever.delta_usd)}`}>{usd(lever.delta_usd)}</b>
                     <small className="t-muted t-num">{pct(lever.apr_percent)} a year</small>
                   </span>
-                  <button type="button" className="t-btn" onClick={() => setParams({ ...lever.params, days: params.days })}>
+                  <button type="button" className="t-btn" onClick={() => setParams({ ...params, ...lever.params, days: params.days })}>
                     Apply
                   </button>
                 </li>
@@ -608,11 +631,30 @@ export function StrategyLab() {
           <section className="t-panel td-section" style={{ marginTop: 16 }}>
             <h3>Read this before trusting the number</h3>
             <ul className="t-checks">
+              {lab.params.use_predicted ? (
+                <li className="t-check" data-status="warn">
+                  <span aria-hidden="true">!</span>
+                  <span>
+                    Predicted-rate mode assumes each exchange's prediction a few minutes before settlement equals the settled rate. Binance's matched exactly for about
+                    80% of contracts in a check, so treat this as a ceiling. The paper bot scores every prediction it makes, so check its accuracy there.
+                  </span>
+                </li>
+              ) : null}
+              <li className="t-check" data-status={lab.measured_slippage_coins ? "pass" : "info"}>
+                <span aria-hidden="true">{lab.measured_slippage_coins ? "✓" : "i"}</span>
+                <span>
+                  {lab.measured_slippage_coins
+                    ? `Slippage for the ${lab.measured_slippage_coins} coins these rules trade comes from their live order books at $${lab.params.notional_usd.toLocaleString()} a leg (today's depth applied to past trades); other coins use the flat setting.`
+                    : "Slippage is the flat setting for every coin. Switch to live order books to charge thin coins what they really cost."}
+                </span>
+              </li>
               <li className="t-check" data-status="info">
                 <span aria-hidden="true">i</span>
                 <span>
-                  No look-ahead: decisions use only rates that had already settled, new positions are paid from the next settlement, and positions still open at
-                  the end are charged their exit cost.
+                  {lab.params.use_predicted
+                    ? "Decisions see only settled rates plus the coming settlement's (predicted) rate, never anything later."
+                    : "No look-ahead: decisions use only rates that had already settled."}{" "}
+                  New positions are paid from the next settlement, and positions still open at the end are charged their exit cost.
                 </span>
               </li>
               <li className="t-check" data-status="warn">

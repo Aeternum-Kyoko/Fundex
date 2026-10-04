@@ -11,6 +11,9 @@ from app.api.admin import router as admin_router
 from app.api.routes import router
 from app.core.config import get_settings
 from app.services.backtest import BacktestService
+from app.services.book_costs import BookCostCache
+from app.services.exchange_profiles import ExchangeSpecs
+from app.services.liquidity import OrderBookFetcher
 from app.services.history_store import HistoryStore
 from app.services.market_engine import MarketEngine
 from app.services.market_store import MarketStore
@@ -38,6 +41,8 @@ async def lifespan(app: FastAPI):
     app.state.telegram_notifier = engine.telegram_notifier
     app.state.trade_manager = trade_manager
     app.state.backtest = BacktestService(engine.client, settings.database_file)
+    app.state.book_costs = BookCostCache(OrderBookFetcher(engine.client))
+    app.state.exchange_specs = ExchangeSpecs(engine.client, engine.adapters)
     strategy_bot = StrategyRunner(app.state.backtest, trade_manager, store, settings.database_file)
     app.state.strategy_bot = strategy_bot
     app.state.settings = settings

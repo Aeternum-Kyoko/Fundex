@@ -14,7 +14,7 @@ import "./binance.css";
 import "./motion.css";
 
 export type NavKey = "dashboard" | "trade" | "results" | "backtest";
-export type ActiveKey = NavKey | "compare" | "learn";
+export type ActiveKey = NavKey | "compare" | "learn" | "exchanges";
 export type SectionTab = "health" | "leaders" | "heatmap" | "trends" | "calendar" | "settlements" | "alerts";
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "/api";
@@ -203,6 +203,7 @@ export function AppChrome({ active, children, topMiddle, topActions, hideBrandTe
 
   const items: MoreItem[] = [
     { label: "Compare a coin", description: "Every exchange side by side for one coin", onClick: () => setPanel("compare") },
+    { label: "Exchanges", description: "Each exchange in detail: fees, contracts and every coin", href: "/exchanges" },
     sectionItem("health", "Exchange health", "Feed status for every exchange"),
     sectionItem("leaders", "Funding leaders", "Highest and lowest rates on each exchange"),
     sectionItem("heatmap", "Funding heatmap", "Every coin and exchange, coloured by rate"),
@@ -225,7 +226,7 @@ export function AppChrome({ active, children, topMiddle, topActions, hideBrandTe
   // On a laptop the top bar already carries Compare and How it works, and the dashboard tabs carry the sections,
   // so More keeps only what has no other home.
   const sectionLabels = new Set(["Exchange health", "Funding leaders", "Funding heatmap", "Rate history", "Settlement calendar", "Settlements", "Alerts"]);
-  const hiddenOnWide = new Set(["Compare a coin", "How Fundex works", ...(onSection ? sectionLabels : [])]);
+  const hiddenOnWide = new Set(["Compare a coin", "Exchanges", "How Fundex works", ...(onSection ? sectionLabels : [])]);
   const moreItems = wide ? items.filter((item) => !hiddenOnWide.has(item.label)) : items;
 
   const renderItem = (item: MoreItem) =>
@@ -259,6 +260,10 @@ export function AppChrome({ active, children, topMiddle, topActions, hideBrandTe
             {Icon.compare}
             <span>Compare</span>
           </button>
+          <a className="t-nav-extra" href="/exchanges" aria-current={active === "exchanges" ? "page" : undefined}>
+            {Icon.exchange}
+            <span>Exchanges</span>
+          </a>
           <a className="t-nav-extra" href="/learn" aria-current={active === "learn" ? "page" : undefined}>
             {Icon.help}
             <span>How it works</span>
@@ -314,7 +319,7 @@ export function AppChrome({ active, children, topMiddle, topActions, hideBrandTe
         </Dialog>
       ) : null}
       {panel === "jump" ? (
-        <CommandPalette pages={NAV.map((item) => ({ label: item.label, href: item.href }))} actions={items} exchangesQuery={exchangesQuery} onClose={closePanel} />
+        <CommandPalette pages={[...NAV.map((item) => ({ label: item.label, href: item.href })), { label: "Exchanges", href: "/exchanges" }]} actions={items} exchangesQuery={exchangesQuery} onClose={closePanel} />
       ) : null}
       {panel === "ios" ? (
         <Dialog title="Add Fundex to your Home Screen" onClose={closePanel}>

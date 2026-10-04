@@ -1983,6 +1983,7 @@ a.cp-row:hover { background: var(--t-surface); }
   white-space: nowrap;
 }
 .sl-tabs a[aria-current="page"] { background: var(--t-surface-2); color: var(--t-amber); }
+.sl-modes { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .sl-busy { font-size: 12.5px; font-weight: 400; }
 .sl-rule, .sl-note { margin: 12px 0 0; font-size: 13.5px; max-width: 80ch; }
 .sl-note { margin: 0 0 12px; }
@@ -2057,6 +2058,7 @@ a.cp-row:hover { background: var(--t-surface); }
 .sb-kpis b.t-receive { color: var(--t-receive); }
 .sb-kpis b.t-pay { color: var(--t-pay); }
 .sb-kpis small { font-size: 12px; }
+.sb-small { margin: 0; font-size: 13px; }
 .sb-close { padding: 4px 10px; font-size: 12.5px; }
 .sb-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; margin-top: 16px; }
 .sb-columns h4 { margin: 0 0 6px; font-size: 13.5px; font-weight: 600; color: var(--t-text-2); }
@@ -2078,6 +2080,48 @@ a.cp-row:hover { background: var(--t-surface); }
   .sl-levers .t-btn { grid-column: 1 / -1; }
   .td-switches .sl-tabs { grid-column: 1 / -1; display: flex; }
   .td-switches .sl-tabs a { flex: 1; text-align: center; }
+}
+
+/* ---------- Exchanges ---------- */
+
+.xc-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 12px; }
+.xc-card { display: grid; gap: 10px; color: inherit; text-decoration: none; transition: border-color 0.2s var(--t-ease), transform 0.2s var(--t-ease); }
+.xc-card:hover { border-color: var(--t-line-strong); transform: translateY(-1px); }
+.xc-card-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.xc-card-head strong { font-size: 17px; }
+.xc-name { display: inline-flex; align-items: center; gap: 8px; }
+.xc-dot { width: 10px; height: 10px; border-radius: 3px; background: var(--x, var(--t-amber)); }
+.xc-card-sub, .xc-card-foot { margin: 0; font-size: 12.5px; }
+.xc-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 12px; margin: 0; }
+.xc-facts dt { color: var(--t-text-3); font-size: 12px; }
+.xc-facts dd { margin: 2px 0 0; color: var(--t-text); font-size: 14.5px; font-weight: 600; }
+.xc-facts dd small { display: block; font-weight: 400; font-size: 11.5px; }
+.xc-health { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 500; color: var(--t-text-2); vertical-align: middle; }
+.xc-health i { width: 8px; height: 8px; border-radius: 50%; background: var(--t-text-3); }
+.xc-health[data-state="ok"] i { background: var(--t-receive); }
+.xc-health[data-state="down"] i { background: var(--t-pay); }
+.td-title .xc-health { margin-left: 8px; font-size: 13px; }
+.xc-title-sub { font-size: 0.55em; font-weight: 500; }
+.xc-links { flex-wrap: wrap; }
+.xc-table td, .xc-table th { white-space: nowrap; }
+.xc-link-row { cursor: pointer; }
+.xc-link-row:hover td { background: color-mix(in srgb, var(--t-surface-2) 60%, transparent); }
+.xc-link-row a { color: var(--t-text); text-decoration: none; }
+.sl-table tr[data-current] td { background: color-mix(in srgb, var(--t-amber) 10%, transparent); }
+.xc-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+.xc-search { min-width: 0; flex: 0 1 220px; padding: 7px 12px; border-radius: 9px; border: 1px solid var(--t-line); background: var(--t-surface); color: var(--t-text); font: inherit; font-size: 14px; }
+.xc-source { display: block; margin-top: 4px; font-size: 12px; white-space: normal; }
+.xc-count { font-size: 12.5px; font-weight: 400; }
+.xc-more { margin-top: 12px; }
+.xc-about li { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 10px; align-items: start; font-size: 13.5px; }
+.xc-three { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr); gap: 12px; margin-top: 16px; }
+.xc-feed li { font-size: 13px; }
+
+@media (max-width: 760px) {
+  .xc-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .xc-three { grid-template-columns: minmax(0, 1fr); }
+  .xc-search { flex: 1 1 100%; }
+  .xc-about li { grid-template-columns: minmax(0, 1fr); gap: 2px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

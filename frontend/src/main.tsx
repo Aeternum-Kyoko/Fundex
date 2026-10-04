@@ -10,6 +10,7 @@ const SymbolTradePage = lazy(() => import("./pages/SymbolTradePage").then((modul
 const Performance = lazy(() => import("./terminal/Performance").then((module) => ({ default: module.Performance })));
 const Backtest = lazy(() => import("./terminal/Backtest").then((module) => ({ default: module.Backtest })));
 const StrategyLab = lazy(() => import("./terminal/StrategyLab").then((module) => ({ default: module.StrategyLab })));
+const Exchanges = lazy(() => import("./terminal/Exchanges").then((module) => ({ default: module.Exchanges })));
 const Learn = lazy(() => import("./terminal/Learn").then((module) => ({ default: module.Learn })));
 const TradeHub = lazy(() => import("./terminal/TradeHub").then((module) => ({ default: module.TradeHub })));
 
@@ -20,6 +21,14 @@ function resolveRoute() {
     return (
       <PageFrame active="compare">
         <ComparePage key={pathname} canonicalSymbol={canonicalSymbol} />
+      </PageFrame>
+    );
+  }
+  if (pathname === "/exchanges" || pathname.startsWith("/exchanges/")) {
+    const [exchange, coin] = pathname.replace(/^\/exchanges\/?/, "").split("/").map((part) => decodeURIComponent(part)).filter(Boolean);
+    return (
+      <PageFrame active="exchanges">
+        <Exchanges key={pathname} exchange={exchange} coin={coin} />
       </PageFrame>
     );
   }

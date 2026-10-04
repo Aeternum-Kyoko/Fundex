@@ -53,6 +53,9 @@ def _utcnow() -> datetime:
 WALL_CLOCK_STEP_SECONDS = 5.0
 # Entering later than this after the planned entry moment is refused: the funding window is likely gone.
 MAX_ENTRY_LATENESS_SECONDS = 20.0
+# Maker-first paper fills: how often the book is re-read while a limit order waits.
+MAKER_POLL_SECONDS = 2.0
+DEFAULT_MAKER_FEE_PERCENT = 0.02
 
 
 def _compact_json(payload: dict[str, Any]) -> str:
@@ -572,8 +575,14 @@ class TradeManager:
         signal_apr: float,
         opened_by: str,
         mode: TradeMode = "paper",
+        execution: str = "taker",
+        maker_wait_seconds: float = 30.0,
     ) -> TradeSessionResponse:
-        """Open an open-ended hedge at live order-book prices. It stays open until close_carry."""
+        """Open an open-ended hedge at live order-book prices. It stays open until close_carry.
+
+        execution "maker_first" posts a limit order at the touch on each leg and crosses the book only if it
+        has not filled after maker_wait_seconds; "taker" crosses straight away.
+        """
         if mode != "paper":
             raise HTTPException(status_code=400, detail="Automatic live trading is not switched on yet; the strategy bot trades on paper.")
         snapshots = await self.market_store.get_snapshots()
@@ -590,16 +599,17 @@ class TradeManager:
             basis_risk_buffer_percent=0.0,
         )
         # Both fills first: a thin book raises here and nothing is recorded.
-        (long_price, long_mid, long_note), (short_price, short_mid, short_note) = await asyncio.gather(
-            self._book_fill(plan.long_leg, "buy"), self._book_fill(plan.short_leg, "sell")
+        (long_price, long_mid, long_note, long_fee), (short_price, short_mid, short_note, short_fee) = await asyncio.gather(
+            self._carry_fill(plan.long_leg, "buy", execution, maker_wait_seconds, long_snapshot.maker_fee_bps / 100, plan.long_leg.taker_fee_percent),
+            self._carry_fill(plan.short_leg, "sell", execution, maker_wait_seconds, short_snapshot.maker_fee_bps / 100, plan.short_leg.taker_fee_percent),
         )
 
         now = _utcnow()
         session_id = uuid.uuid4().hex
         legs = []
-        for plan_leg, max_leverage, price, mid, note in (
-            (plan.long_leg, opportunity.long_leg.max_leverage, long_price, long_mid, long_note),
-            (plan.short_leg, opportunity.short_leg.max_leverage, short_price, short_mid, short_note),
+        for plan_leg, max_leverage, price, mid, note, fee_percent in (
+            (plan.long_leg, opportunity.long_leg.max_leverage, long_price, long_mid, long_note, long_fee),
+            (plan.short_leg, opportunity.short_leg.max_leverage, short_price, short_mid, short_note, short_fee),
         ):
             supported, support_note = _support_for_exchange(plan_leg.exchange)  # type: ignore[arg-type]
             leg = self._build_trade_leg(plan_leg, max_leverage, supported, support_note)
@@ -607,11 +617,21 @@ class TradeManager:
             leg.entry_order_id = f"paper-entry-{session_id}-{plan_leg.side}"
             leg.entry_fill_price = price
             leg.entry_mid_price = mid
-            # The fee rate travels with the leg so the exit can be charged after a restart.
-            leg.raw_entry_response = {"mode": "paper", "simulated": True, "fill_price": price, "mid_price": mid, "note": note, "taker_fee_percent": plan_leg.taker_fee_percent, "at": now.isoformat()}
+            # Fee rates travel with the leg so the exit can be charged the same way after a restart.
+            leg.raw_entry_response = {
+                "mode": "paper",
+                "simulated": True,
+                "fill_price": price,
+                "mid_price": mid,
+                "note": note,
+                "fee_percent": fee_percent,
+                "taker_fee_percent": plan_leg.taker_fee_percent,
+                "maker_fee_percent": (long_snapshot if plan_leg.side == "buy" else short_snapshot).maker_fee_bps / 100,
+                "at": now.isoformat(),
+            }
             legs.append(leg)
 
-        entry_fees = sum(leg.entry_fill_price * leg.estimated_quantity * leg.raw_entry_response["taker_fee_percent"] / 100 for leg in legs)  # type: ignore[index, operator]
+        entry_fees = sum(leg.entry_fill_price * leg.estimated_quantity * leg.raw_entry_response["fee_percent"] / 100 for leg in legs)  # type: ignore[index, operator]
         response = TradeSessionResponse(
             id=session_id,
             canonical_symbol=opportunity.canonical_symbol,
@@ -689,33 +709,41 @@ class TradeManager:
             await self.journal.save(response)
         return added
 
-    async def close_carry(self, session_id: str, reason: str) -> TradeSessionResponse:
+    async def close_carry(self, session_id: str, reason: str, execution: str = "taker", maker_wait_seconds: float = 30.0) -> TradeSessionResponse:
         async with self._lock:
             response = self._carry.get(session_id)
         if response is None:
             raise HTTPException(status_code=404, detail="Open strategy position not found.")
         response.status = "exiting"
         notes = []
-        for leg in (response.long_leg, response.short_leg):
+
+        async def exit_fill(leg: TradeLegExecution) -> tuple[float, float | None, str, float]:
             action = "sell" if leg.side == "buy" else "buy"
+            rates = leg.raw_entry_response or {}
+            taker = rates.get("taker_fee_percent", 0.05)
             try:
-                price, mid, note = await self._book_fill(leg, action)  # type: ignore[arg-type]
+                return await self._carry_fill(leg, action, execution, maker_wait_seconds, rates.get("maker_fee_percent", DEFAULT_MAKER_FEE_PERCENT), taker)  # type: ignore[arg-type]
             except Exception as exc:  # noqa: BLE001
                 # Paper positions must always close; say how the price was taken.
-                price, mid, note = leg.reference_price, None, f"book too thin ({exc}); closed at the entry reference"
+                return leg.reference_price, None, f"book too thin ({exc}); closed at the entry reference", taker
+
+        fills = await asyncio.gather(exit_fill(response.long_leg), exit_fill(response.short_leg))
+        for leg, (price, mid, note, fee_percent) in zip((response.long_leg, response.short_leg), fills):
+            action = "sell" if leg.side == "buy" else "buy"
             leg.status = "closed"
             leg.exit_order_id = f"paper-exit-{response.id}-{leg.side}"
             leg.exit_fill_price = price
             leg.exit_mid_price = mid
-            leg.raw_exit_response = {"mode": "paper", "simulated": True, "fill_price": price, "mid_price": mid, "note": note, "at": _utcnow().isoformat()}
+            leg.raw_exit_response = {"mode": "paper", "simulated": True, "fill_price": price, "mid_price": mid, "note": note, "fee_percent": fee_percent, "at": _utcnow().isoformat()}
             notes.append(f"{leg.display_name} {action} at {_format_decimal(price)} ({note})")
 
         fees = 0.0
         slippage = 0.0
         for leg in (response.long_leg, response.short_leg):
-            rate = (leg.raw_entry_response or {}).get("taker_fee_percent", 0.05)
-            for fill, mid in ((leg.entry_fill_price, leg.entry_mid_price), (leg.exit_fill_price, leg.exit_mid_price)):
+            for fill, mid, raw in ((leg.entry_fill_price, leg.entry_mid_price, leg.raw_entry_response), (leg.exit_fill_price, leg.exit_mid_price, leg.raw_exit_response)):
                 if fill is not None:
+                    raw = raw or {}
+                    rate = raw.get("fee_percent", raw.get("taker_fee_percent", (leg.raw_entry_response or {}).get("taker_fee_percent", 0.05)))
                     fees += fill * leg.estimated_quantity * rate / 100
                     if mid:
                         slippage += abs(fill - mid) * leg.estimated_quantity
@@ -747,6 +775,49 @@ class TradeManager:
         await self.journal.save(response)
         self._spawn(self._notify_response(response, "completed"))
         return response
+
+    async def _carry_fill(
+        self, leg: ExecutionLegPlan, action: str, execution: str, maker_wait_seconds: float, maker_fee_percent: float, taker_fee_percent: float
+    ) -> tuple[float, float | None, str, float]:
+        """(price, mid, note, fee %) for one paper fill, maker-first or straight across the book."""
+        if execution == "maker_first" and maker_wait_seconds > 0:
+            filled = await self._paper_limit_fill(leg, action, maker_wait_seconds)
+            if filled is not None:
+                price, waited = filled
+                # Resting at the touch pays no spread: the fill is the reference, so no slippage is booked.
+                return price, price, f"limit at the touch filled after {waited:.0f}s (maker)", maker_fee_percent
+            price, mid, note = await self._book_fill(leg, action)
+            return price, mid, f"limit not filled in {maker_wait_seconds:.0f}s, crossed the book: {note}", taker_fee_percent
+        price, mid, note = await self._book_fill(leg, action)
+        return price, mid, note, taker_fee_percent
+
+    async def _paper_limit_fill(self, leg: ExecutionLegPlan, action: str, wait_seconds: float) -> tuple[float, float] | None:
+        """Paper limit order at the best bid (buy) or best ask (sell). It counts as filled only once the other
+        side of the book reaches that price, a conservative stand-in for queue position. Returns (price, seconds)."""
+
+        async def touch() -> tuple[float, float] | None:
+            try:
+                book = await self._books.fetch(leg.exchange, leg.exchange_symbol)  # type: ignore[arg-type]
+            except Exception:  # noqa: BLE001
+                return None
+            if not book or not book[0] or not book[1]:
+                return None
+            return max(price for price, _ in book[0]), min(price for price, _ in book[1])
+
+        first = await touch()
+        if first is None:
+            return None
+        limit = first[0] if action == "buy" else first[1]
+        started = time.monotonic()
+        while time.monotonic() - started < wait_seconds:
+            await asyncio.sleep(MAKER_POLL_SECONDS)
+            current = await touch()
+            if current is None:
+                continue
+            best_bid, best_ask = current
+            if (action == "buy" and best_ask <= limit) or (action == "sell" and best_bid >= limit):
+                return limit, time.monotonic() - started
+        return None
 
     async def _notify_response(self, response: TradeSessionResponse, kind: str) -> None:
         if self.notifier is None:
