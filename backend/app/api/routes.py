@@ -27,6 +27,7 @@ from app.models.trade import (
 )
 from app.services.arbitrage import build_opportunities
 from app.services.backtest import BacktestParams
+from app.services.strategy import StrategyParams, run_lab
 from app.services.execution import build_execution_plan, reverse_opportunity
 from app.services.funding_leaders import build_funding_leaders
 from app.services.liquidity import depth_profile
@@ -510,6 +511,77 @@ async def backtest_resimulate(request: Request, payload: BacktestRequest) -> dic
     if result is None:
         raise HTTPException(status_code=409, detail="Run a backtest first to download the history.")
     return {"params": payload.model_dump(), "result": result}
+
+
+class StrategyRequest(BaseModel):
+    days: int = Field(30, ge=1, le=90)
+    notional_usd: float = Field(1000, gt=0, le=1_000_000)
+    binance_taker_bps: float = Field(5, ge=0, le=20)
+    delta_taker_bps: float = Field(5, ge=0, le=20)
+    slippage_percent_per_leg: float = Field(0.1, ge=0, le=2)
+    lookback: int = Field(3, ge=1, le=24)
+    entry_apr_percent: float = Field(20, ge=0, le=1000)
+    exit_apr_percent: float = Field(5, ge=-500, le=1000)
+    max_positions: int = Field(5, ge=1, le=50)
+
+
+@router.post("/backtest/strategy")
+async def backtest_strategy(request: Request, payload: StrategyRequest) -> dict:
+    """Strategy lab: replays the carry rules on the downloaded history, with a walk-forward search and levers."""
+    backtest = request.app.state.backtest
+    series = backtest.series()
+    if not series:
+        raise HTTPException(status_code=409, detail="Download the funding history first.")
+    if payload.exit_apr_percent >= payload.entry_apr_percent:
+        raise HTTPException(status_code=422, detail="The exit level must be below the entry level.")
+    days = min(payload.days, backtest.history_days)
+    end = int(datetime.now(timezone.utc).timestamp())
+    params = StrategyParams(**{**payload.model_dump(), "days": days})
+    # The threshold search runs a few hundred replays; keep it off the event loop.
+    return await asyncio.to_thread(run_lab, series, params, end - days * 86400, end)
+
+
+class StrategyBotRequest(BaseModel):
+    enabled: bool
+    mode: str = "paper"
+    leverage: float = Field(2, ge=1, le=10)
+    params: StrategyRequest
+
+
+@router.get("/strategy/bot")
+async def strategy_bot_state(request: Request) -> dict:
+    """The paper strategy bot: its rules, open positions, settled results and decision log."""
+    return await request.app.state.strategy_bot.state()
+
+
+@router.put("/strategy/bot")
+async def strategy_bot_configure(request: Request, payload: StrategyBotRequest) -> dict:
+    if payload.params.exit_apr_percent >= payload.params.entry_apr_percent:
+        raise HTTPException(status_code=422, detail="The exit level must be below the entry level.")
+    try:
+        await request.app.state.strategy_bot.configure(
+            enabled=payload.enabled, mode=payload.mode, leverage=payload.leverage, params=StrategyParams(**payload.params.model_dump())
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return await request.app.state.strategy_bot.state()
+
+
+@router.post("/strategy/bot/check")
+async def strategy_bot_check(request: Request) -> dict:
+    """Run a decision round now instead of waiting for the next hour."""
+    bot = request.app.state.strategy_bot
+    try:
+        summary = await bot.tick()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"summary": summary, **(await bot.state())}
+
+
+@router.post("/strategy/bot/positions/{session_id}/close")
+async def strategy_bot_close(request: Request, session_id: str) -> dict:
+    await request.app.state.trade_manager.close_carry(session_id, "closed by hand")
+    return await request.app.state.strategy_bot.state()
 
 
 @router.get("/trade/journal", response_model=list[TradeSessionResponse])

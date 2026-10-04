@@ -115,12 +115,20 @@ class TradeManager:
         self._books = OrderBookFetcher(self.client)
         self._funding_resolver = SettledFundingResolver(self.client, market_store)
         self._background: set[asyncio.Task[None]] = set()
+        # Open carry positions (strategy bot). Paper positions are virtual, so they survive restarts.
+        self._carry: dict[str, TradeSessionResponse] = {}
         # Set by the app: sends trade results to Telegram (optional).
         self.notifier = None
 
     async def start(self) -> None:
         # A restart kills in-flight sessions; record that honestly instead of leaving them "running".
         for session in await self.journal.interrupted():
+            if session.strategy == "carry" and session.mode == "paper":
+                # Nothing was running in-process: the position is still "open" and the bot picks it up again.
+                session.status = "entered"
+                session.current_phase = "Holding: collecting funding"
+                self._carry[session.id] = session
+                continue
             session.status = "failed"
             session.current_phase = "Interrupted by a server restart"
             session.updated_at = _utcnow()
@@ -402,6 +410,9 @@ class TradeManager:
     async def get_session(self, session_id: str) -> TradeSessionResponse:
         async with self._lock:
             record = self._sessions.get(session_id)
+            carry = self._carry.get(session_id)
+        if carry is not None:
+            return carry
         if record is not None:
             return record.response
         stored = await self.journal.get(session_id)
@@ -547,6 +558,201 @@ class TradeManager:
             self._simulate_fill(session_id, "long", exit_order=True),
             self._simulate_fill(session_id, "short", exit_order=True),
         )
+
+    # ---------- Carry positions, opened and closed by the strategy bot ----------
+
+    async def open_carry(
+        self,
+        *,
+        canonical_symbol: str,
+        long_exchange: ExchangeName,
+        short_exchange: ExchangeName,
+        notional_usd: float,
+        leverage: float,
+        signal_apr: float,
+        opened_by: str,
+        mode: TradeMode = "paper",
+    ) -> TradeSessionResponse:
+        """Open an open-ended hedge at live order-book prices. It stays open until close_carry."""
+        if mode != "paper":
+            raise HTTPException(status_code=400, detail="Automatic live trading is not switched on yet; the strategy bot trades on paper.")
+        snapshots = await self.market_store.get_snapshots()
+        long_snapshot = self._resolve_snapshot(snapshots, canonical_symbol, long_exchange)
+        short_snapshot = self._resolve_snapshot(snapshots, canonical_symbol, short_exchange)
+        opportunity = build_opportunity(long_snapshot, short_snapshot, self.settings, context=self.ranking_context)
+        plan = build_execution_plan(
+            opportunity,
+            notional_usd=notional_usd,
+            capital_usd=None,
+            leverage=leverage,
+            leverage_overrides=None,
+            holding_periods=1,
+            basis_risk_buffer_percent=0.0,
+        )
+        # Both fills first: a thin book raises here and nothing is recorded.
+        (long_price, long_mid, long_note), (short_price, short_mid, short_note) = await asyncio.gather(
+            self._book_fill(plan.long_leg, "buy"), self._book_fill(plan.short_leg, "sell")
+        )
+
+        now = _utcnow()
+        session_id = uuid.uuid4().hex
+        legs = []
+        for plan_leg, max_leverage, price, mid, note in (
+            (plan.long_leg, opportunity.long_leg.max_leverage, long_price, long_mid, long_note),
+            (plan.short_leg, opportunity.short_leg.max_leverage, short_price, short_mid, short_note),
+        ):
+            supported, support_note = _support_for_exchange(plan_leg.exchange)  # type: ignore[arg-type]
+            leg = self._build_trade_leg(plan_leg, max_leverage, supported, support_note)
+            leg.status = "filled"
+            leg.entry_order_id = f"paper-entry-{session_id}-{plan_leg.side}"
+            leg.entry_fill_price = price
+            leg.entry_mid_price = mid
+            # The fee rate travels with the leg so the exit can be charged after a restart.
+            leg.raw_entry_response = {"mode": "paper", "simulated": True, "fill_price": price, "mid_price": mid, "note": note, "taker_fee_percent": plan_leg.taker_fee_percent, "at": now.isoformat()}
+            legs.append(leg)
+
+        entry_fees = sum(leg.entry_fill_price * leg.estimated_quantity * leg.raw_entry_response["taker_fee_percent"] / 100 for leg in legs)  # type: ignore[index, operator]
+        response = TradeSessionResponse(
+            id=session_id,
+            canonical_symbol=opportunity.canonical_symbol,
+            mode=mode,
+            scenario="best",
+            status="entered",
+            current_phase="Holding: collecting funding",
+            created_at=now,
+            updated_at=now,
+            scheduled_entry_at=now,
+            capital_input_usd=plan.capital_required_usd,
+            leverage=leverage,
+            holding_periods=1,
+            expected_net_pnl_usd=-plan.estimated_total_fees_usd,
+            expected_funding_pnl_usd=0.0,
+            estimated_total_fees_usd=plan.estimated_total_fees_usd,
+            expected_net_return_on_capital_percent=0.0,
+            realized_funding_pnl_usd=0.0,
+            realized_total_fees_usd=entry_fees,
+            realized_net_pnl_usd=-entry_fees,
+            strategy="carry",
+            funding_status="pending",
+            expected_slippage_usd=plan.estimated_total_slippage_usd,
+            opened_by=opened_by,
+            entry_signal_apr=signal_apr,
+            warnings=list(plan.warnings),
+            events=[
+                TradeEvent(
+                    at=now,
+                    phase="entered",
+                    message=(
+                        f"Opened by the strategy bot: long {legs[0].display_name} at {_format_decimal(long_price)} ({long_note}), "
+                        f"short {legs[1].display_name} at {_format_decimal(short_price)} ({short_note}). Spread {signal_apr:.0f}% a year."
+                    ),
+                )
+            ],
+            long_leg=legs[0],
+            short_leg=legs[1],
+        )
+        async with self._lock:
+            self._carry[session_id] = response
+        await self.journal.save(response)
+        return response
+
+    async def open_carry_positions(self, opened_by: str | None = None) -> list[TradeSessionResponse]:
+        async with self._lock:
+            return [item for item in self._carry.values() if opened_by is None or item.opened_by == opened_by]
+
+    async def credit_carry_funding(self, session_id: str, payments: list[tuple[str, datetime, float]]) -> float:
+        """Credit settled funding to an open carry position: [(exchange, settled at, rate)]. Returns USD added."""
+        async with self._lock:
+            response = self._carry.get(session_id)
+        if response is None:
+            return 0.0
+        seen = {(leg.exchange, leg.settles_at) for leg in response.funding_legs}
+        added = 0.0
+        for exchange, settles_at, rate in payments:
+            if (exchange, settles_at) in seen or settles_at <= response.created_at:
+                continue
+            side = "long" if response.long_leg.exchange == exchange else "short"
+            trade_leg = response.long_leg if side == "long" else response.short_leg
+            position_value = (trade_leg.entry_fill_price or trade_leg.reference_price) * trade_leg.estimated_quantity
+            # Longs pay a positive rate, shorts receive it.
+            payment = (-rate if side == "long" else rate) * position_value
+            response.funding_legs.append(
+                FundingLegResult(exchange=exchange, side=side, settles_at=settles_at, predicted_rate=rate, actual_rate=rate, source="exchange_history", payment_usd=payment)  # type: ignore[arg-type]
+            )
+            added += payment
+        if added or len(response.funding_legs) != len(seen):
+            response.funding_legs.sort(key=lambda leg: leg.settles_at)
+            response.funding_status = "settled"
+            response.realized_funding_pnl_usd = sum(leg.payment_usd or 0.0 for leg in response.funding_legs)
+            response.realized_net_pnl_usd = response.realized_funding_pnl_usd - (response.realized_total_fees_usd or 0.0)
+            response.updated_at = _utcnow()
+            await self.journal.save(response)
+        return added
+
+    async def close_carry(self, session_id: str, reason: str) -> TradeSessionResponse:
+        async with self._lock:
+            response = self._carry.get(session_id)
+        if response is None:
+            raise HTTPException(status_code=404, detail="Open strategy position not found.")
+        response.status = "exiting"
+        notes = []
+        for leg in (response.long_leg, response.short_leg):
+            action = "sell" if leg.side == "buy" else "buy"
+            try:
+                price, mid, note = await self._book_fill(leg, action)  # type: ignore[arg-type]
+            except Exception as exc:  # noqa: BLE001
+                # Paper positions must always close; say how the price was taken.
+                price, mid, note = leg.reference_price, None, f"book too thin ({exc}); closed at the entry reference"
+            leg.status = "closed"
+            leg.exit_order_id = f"paper-exit-{response.id}-{leg.side}"
+            leg.exit_fill_price = price
+            leg.exit_mid_price = mid
+            leg.raw_exit_response = {"mode": "paper", "simulated": True, "fill_price": price, "mid_price": mid, "note": note, "at": _utcnow().isoformat()}
+            notes.append(f"{leg.display_name} {action} at {_format_decimal(price)} ({note})")
+
+        fees = 0.0
+        slippage = 0.0
+        for leg in (response.long_leg, response.short_leg):
+            rate = (leg.raw_entry_response or {}).get("taker_fee_percent", 0.05)
+            for fill, mid in ((leg.entry_fill_price, leg.entry_mid_price), (leg.exit_fill_price, leg.exit_mid_price)):
+                if fill is not None:
+                    fees += fill * leg.estimated_quantity * rate / 100
+                    if mid:
+                        slippage += abs(fill - mid) * leg.estimated_quantity
+        now = _utcnow()
+        response.realized_price_pnl_usd = self._leg_price_pnl(response.long_leg) + self._leg_price_pnl(response.short_leg)
+        response.realized_total_fees_usd = fees
+        response.realized_slippage_usd = slippage
+        response.realized_funding_pnl_usd = sum(leg.payment_usd or 0.0 for leg in response.funding_legs)
+        response.realized_net_pnl_usd = response.realized_price_pnl_usd + response.realized_funding_pnl_usd - fees
+        response.funding_status = "settled" if response.funding_legs else "not_applicable"
+        response.status = "completed"
+        response.current_phase = "Closed by the strategy bot" if response.opened_by else "Closed"
+        response.scheduled_exit_at = now
+        response.exit_reason = reason
+        response.updated_at = now
+        response.events.append(TradeEvent(at=now, phase="exit", message=f"Closed: {reason}. " + "; ".join(notes) + "."))
+        response.events.append(
+            TradeEvent(
+                at=now,
+                phase="completed",
+                message=(
+                    f"{len(response.funding_legs)} settlements, funding {response.realized_funding_pnl_usd:+.2f} USD, price {response.realized_price_pnl_usd:+.2f} USD, "
+                    f"fees {fees:.2f} USD. Net {response.realized_net_pnl_usd:+.2f} USD."
+                ),
+            )
+        )
+        async with self._lock:
+            self._carry.pop(session_id, None)
+        await self.journal.save(response)
+        self._spawn(self._notify_response(response, "completed"))
+        return response
+
+    async def _notify_response(self, response: TradeSessionResponse, kind: str) -> None:
+        if self.notifier is None:
+            return
+        with contextlib.suppress(Exception):
+            await self.notifier.notify_trade(response, kind)
 
     async def _book_mid(self, leg: ExecutionLegPlan) -> float | None:
         with contextlib.suppress(Exception):

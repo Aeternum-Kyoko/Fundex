@@ -9,6 +9,7 @@ const ComparePage = lazy(() => import("./terminal/ComparePage").then((module) =>
 const SymbolTradePage = lazy(() => import("./pages/SymbolTradePage").then((module) => ({ default: module.SymbolTradePage })));
 const Performance = lazy(() => import("./terminal/Performance").then((module) => ({ default: module.Performance })));
 const Backtest = lazy(() => import("./terminal/Backtest").then((module) => ({ default: module.Backtest })));
+const StrategyLab = lazy(() => import("./terminal/StrategyLab").then((module) => ({ default: module.StrategyLab })));
 const Learn = lazy(() => import("./terminal/Learn").then((module) => ({ default: module.Learn })));
 const TradeHub = lazy(() => import("./terminal/TradeHub").then((module) => ({ default: module.TradeHub })));
 
@@ -33,6 +34,13 @@ function resolveRoute() {
     return (
       <PageFrame active="backtest">
         <Backtest />
+      </PageFrame>
+    );
+  }
+  if (pathname === "/strategy") {
+    return (
+      <PageFrame active="backtest">
+        <StrategyLab />
       </PageFrame>
     );
   }

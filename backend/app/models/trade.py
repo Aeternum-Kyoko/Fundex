@@ -12,7 +12,7 @@ TradeMode = Literal["paper", "live"]
 TradeScenario = Literal["best", "reverse"]
 TradeSessionStatus = Literal["armed", "entering", "entered", "exiting", "completed", "failed", "cancelled"]
 TradeLegStatus = Literal["pending", "submitted", "filled", "closed", "failed", "skipped"]
-TradeStrategy = Literal["capture", "hold"]
+TradeStrategy = Literal["capture", "hold", "carry"]
 FundingStatus = Literal["not_applicable", "pending", "settled", "partly_estimated", "estimated"]
 
 
@@ -140,5 +140,9 @@ class TradeSessionResponse(BaseModel):
     realized_slippage_usd: float | None = None
     warnings: list[str] = Field(default_factory=list)
     events: list[TradeEvent] = Field(default_factory=list)
+    # Carry positions opened by the strategy bot: open-ended, closed when the spread fades.
+    opened_by: str | None = None
+    entry_signal_apr: float | None = None
+    exit_reason: str | None = None
     long_leg: TradeLegExecution
     short_leg: TradeLegExecution

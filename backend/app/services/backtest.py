@@ -201,12 +201,20 @@ class FundingHistoryCache:
             ).fetchall()
         return {moment: rate for moment, rate in rows}
 
-    def latest(self, exchange: str, symbol: str) -> int | None:
+    def span(self, exchange: str, symbol: str) -> tuple[int, int] | None:
         with sqlite3.connect(self.database_path) as connection:
             row = connection.execute(
-                "SELECT MAX(funding_time) FROM funding_history WHERE exchange = ? AND symbol = ?", (exchange, symbol)
+                "SELECT MIN(funding_time), MAX(funding_time) FROM funding_history WHERE exchange = ? AND symbol = ?", (exchange, symbol)
             ).fetchone()
-        return row[0] if row and row[0] else None
+        return (row[0], row[1]) if row and row[1] else None
+
+    def fetch_from(self, exchange: str, symbol: str, start: int) -> int:
+        """Only fetch what's missing: after the cached rows, or from the start if a longer period needs older ones."""
+        cached = self.span(exchange, symbol)
+        # A day of slack, so a coin listed after `start` doesn't refetch its whole history on every run.
+        if cached is None or cached[0] > start + 86400:
+            return start
+        return max(start, cached[1] + 1)
 
 
 @dataclass
@@ -227,6 +235,7 @@ class BacktestService:
         self.job = BacktestJob()
         self._task: asyncio.Task | None = None
         self._series: dict[str, CoinSeries] = {}
+        self._history_days = 0
 
     def state(self) -> dict:
         return {
@@ -237,6 +246,8 @@ class BacktestService:
             "params": self.job.params,
             "result": self.job.result,
             "finished_at": self.job.finished_at,
+            "history_coins": len(self._series),
+            "history_days": self._history_days,
         }
 
     def start(self, params: BacktestParams, snapshots: list[FundingSnapshot]) -> bool:
@@ -255,33 +266,52 @@ class BacktestService:
         start = end - params.days * 86400
         return simulate(list(self._series.values()), params, start, end)
 
+    def series(self) -> list[CoinSeries]:
+        return list(self._series.values())
+
+    @property
+    def history_days(self) -> int:
+        return self._history_days
+
+    async def load_series(self, snapshots: list[FundingSnapshot], start: int, end: int, on_progress=None) -> list[CoinSeries]:
+        """Settled history from `start` for every coin listed on both Binance and Delta, through the cache."""
+        binance = {s.canonical_symbol: s for s in snapshots if s.exchange == "binance"}
+        delta = {s.canonical_symbol: s for s in snapshots if s.exchange == "delta"}
+        pairs = sorted(set(binance) & set(delta))
+        semaphore = asyncio.Semaphore(4)
+        done = 0
+
+        async def load(symbol: str) -> CoinSeries | None:
+            nonlocal done
+            async with semaphore:
+                try:
+                    b = await self._binance_history(binance[symbol].exchange_symbol, start)
+                    d = await self._delta_history(delta[symbol].exchange_symbol, delta[symbol].funding_interval_hours, start, end)
+                except Exception:
+                    logger.warning("Funding history failed for %s", symbol, exc_info=True)
+                    return None
+                finally:
+                    done += 1
+                    if on_progress:
+                        on_progress(done, len(pairs))
+                if not b or not d:
+                    return None
+                return CoinSeries(symbol, binance[symbol].base_asset, b, d)
+
+        return [item for item in await asyncio.gather(*(load(symbol) for symbol in pairs)) if item]
+
     async def _run(self, params: BacktestParams, snapshots: list[FundingSnapshot]) -> None:
         try:
-            binance = {s.canonical_symbol: s for s in snapshots if s.exchange == "binance"}
-            delta = {s.canonical_symbol: s for s in snapshots if s.exchange == "delta"}
-            pairs = sorted(set(binance) & set(delta))
-            self.job.total = len(pairs)
             end = int(datetime.now(timezone.utc).timestamp())
             start = end - params.days * 86400
-            semaphore = asyncio.Semaphore(4)
 
-            async def load(symbol: str) -> CoinSeries | None:
-                async with semaphore:
-                    try:
-                        b = await self._binance_history(binance[symbol].exchange_symbol, start)
-                        d = await self._delta_history(delta[symbol].exchange_symbol, delta[symbol].funding_interval_hours, start, end)
-                    except Exception:
-                        logger.warning("Backtest history failed for %s", symbol, exc_info=True)
-                        return None
-                    finally:
-                        self.job.progress += 1
-                        self.job.message = f"Downloaded {self.job.progress} of {self.job.total} coins"
-                    if not b or not d:
-                        return None
-                    return CoinSeries(symbol, binance[symbol].base_asset, b, d)
+            def progress(done: int, total: int) -> None:
+                self.job.progress, self.job.total = done, total
+                self.job.message = f"Downloaded {done} of {total} coins"
 
-            loaded = [item for item in await asyncio.gather(*(load(symbol) for symbol in pairs)) if item]
+            loaded = await self.load_series(snapshots, start, end, progress)
             self._series = {item.canonical_symbol: item for item in loaded}
+            self._history_days = params.days
             self.job.result = simulate(loaded, params, start, end)
             self.job.status = "done"
             self.job.message = f"Replayed {len(loaded)} coins"
@@ -292,8 +322,7 @@ class BacktestService:
             self.job.message = str(exc)
 
     async def _binance_history(self, symbol: str, start: int) -> dict[int, float]:
-        latest = await asyncio.to_thread(self.cache.latest, "binance", symbol)
-        fetch_from = max(start, (latest or 0) + 1)
+        fetch_from = await asyncio.to_thread(self.cache.fetch_from, "binance", symbol, start)
         rows: dict[int, float] = {}
         cursor = fetch_from * 1000
         while True:
@@ -315,8 +344,7 @@ class BacktestService:
         return await asyncio.to_thread(self.cache.load, "binance", symbol, start)
 
     async def _delta_history(self, symbol: str, interval_hours: int, start: int, end: int) -> dict[int, float]:
-        latest = await asyncio.to_thread(self.cache.latest, "delta", symbol)
-        fetch_from = max(start, (latest or 0) + 1)
+        fetch_from = await asyncio.to_thread(self.cache.fetch_from, "delta", symbol, start)
         step = max(interval_hours, 1) * 3600
         rows: dict[int, float] = {}
         chunk = 1500 * 3600

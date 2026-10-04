@@ -14,6 +14,7 @@ from app.services.backtest import BacktestService
 from app.services.history_store import HistoryStore
 from app.services.market_engine import MarketEngine
 from app.services.market_store import MarketStore
+from app.services.strategy_runner import StrategyRunner
 from app.services.trade_manager import TradeManager
 
 settings = get_settings()
@@ -37,12 +38,16 @@ async def lifespan(app: FastAPI):
     app.state.telegram_notifier = engine.telegram_notifier
     app.state.trade_manager = trade_manager
     app.state.backtest = BacktestService(engine.client, settings.database_file)
+    strategy_bot = StrategyRunner(app.state.backtest, trade_manager, store, settings.database_file)
+    app.state.strategy_bot = strategy_bot
     app.state.settings = settings
     await engine.start()
     await trade_manager.start()
+    await strategy_bot.start()
     try:
         yield
     finally:
+        await strategy_bot.stop()
         await engine.stop()
         await trade_manager.stop()
 

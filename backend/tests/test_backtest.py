@@ -75,6 +75,15 @@ class HistoryTests(unittest.TestCase):
         self.assertEqual(binance, {8 * H: 0.0001})
         self.assertEqual(delta, {8 * H: 0.0005})  # 9h is not an 8h boundary; Delta values are in percent
 
+    def test_longer_period_backfills_older_history(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            service = BacktestService(_Client(), Path(directory) / "h.sqlite")  # type: ignore[arg-type]
+            cache = service.cache
+            cache.save("binance", "XUSDT", {30 * 86400: 0.0001, 40 * 86400: 0.0001})
+            self.assertEqual(cache.fetch_from("binance", "XUSDT", 30 * 86400), 40 * 86400 + 1)  # cached: only newer rows
+            self.assertEqual(cache.fetch_from("binance", "XUSDT", 0), 0)  # longer period: start over from the start
+            self.assertEqual(cache.fetch_from("binance", "NEW", 5), 5)
+
 
 if __name__ == "__main__":
     unittest.main()

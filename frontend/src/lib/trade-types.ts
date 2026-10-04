@@ -17,7 +17,7 @@ export interface TradeCreateRequest {
   selected_exchanges: ExchangeName[];
   mode: "paper" | "live";
   scenario: "best" | "reverse";
-  strategy?: "capture" | "hold";
+  strategy?: "capture" | "hold" | "carry";
   capital_usd: number;
   leverage: number;
   leverage_overrides?: Partial<Record<ExchangeName, number>>;
@@ -115,7 +115,7 @@ export interface TradeSessionResponse {
   realized_funding_pnl_usd: number | null;
   realized_total_fees_usd: number | null;
   realized_net_pnl_usd: number | null;
-  strategy?: "capture" | "hold";
+  strategy?: "capture" | "hold" | "carry";
   funding_status?: "not_applicable" | "pending" | "settled" | "partly_estimated" | "estimated";
   funding_legs?: FundingLegResult[];
   expected_slippage_usd?: number | null;

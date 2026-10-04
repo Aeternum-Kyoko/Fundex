@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import "./design.css";
+import { StrategyTabs } from "./StrategyLab";
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "/api";
 
@@ -164,6 +165,7 @@ export function Backtest() {
           </p>
         </div>
         <div className="td-switches">
+          <StrategyTabs active="replay" />
           <button type="button" className="t-btn" data-primary="true" onClick={() => void run()} disabled={running}>
             {running ? "Downloading history…" : result ? "Re-download and run" : "Run backtest"}
           </button>

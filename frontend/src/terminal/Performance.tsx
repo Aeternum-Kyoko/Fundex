@@ -290,7 +290,7 @@ export function Performance() {
                   <span>
                     <strong>{trade.canonical_symbol.split("-")[0]}</strong>{" "}
                     <span className="t-muted">
-                      {trade.mode}, {trade.strategy === "capture" ? "next funding" : "hold"}, long {EXCHANGE_SHORT[trade.long_leg.exchange]}, short {EXCHANGE_SHORT[trade.short_leg.exchange]}
+                      {trade.mode}, {trade.strategy === "capture" ? "next funding" : trade.strategy === "carry" ? "strategy bot" : "hold"}, long {EXCHANGE_SHORT[trade.long_leg.exchange]}, short {EXCHANGE_SHORT[trade.short_leg.exchange]}
                     </span>
                   </span>
                   <span className={trade.status === "failed" ? "t-pay" : trade.status === "completed" ? "t-soft" : "t-muted"}>{trade.status}</span>
