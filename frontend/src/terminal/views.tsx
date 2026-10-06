@@ -5,9 +5,15 @@ import { usePref } from "./prefs";
 import { formatLeverage, formatPrice, formatUsd } from "../lib/monitor";
 import { Empty, SkeletonPanels, SkeletonRows } from "./states";
 import { MiniSpark, rateSparks, type SparkMap, useFundingTrends } from "./trends";
-import { clockTime, Countdown, ExchangeTag, exchangeVar, pct, TrustBadge } from "./primitives";
+import { clockTime, Countdown, EXCHANGE_SHORT, ExchangeTag, exchangeVar, pct, TrustBadge } from "./primitives";
 
 type LeaderMode = "exchange" | "market";
+type LeaderSide = "both" | "positive" | "negative";
+type LeaderSort = "rate" | "apr" | "oi";
+
+const perHourRate = (leader: FundingLeader) => leader.funding_rate / Math.max(leader.funding_interval_hours ?? 8, 1);
+/** Simple (non-compounded) annualised rate in percent, comparable across 1h, 4h and 8h coins. */
+const leaderApr = (leader: FundingLeader) => Math.abs(perHourRate(leader)) * 24 * 365 * 100;
 
 function LeaderRow({ leader, showExchange, onOpen, spark }: { leader: FundingLeader; showExchange: boolean; onOpen: (symbol: string) => void; spark?: number[] }) {
   return (
@@ -37,19 +43,19 @@ function LeaderRow({ leader, showExchange, onOpen, spark }: { leader: FundingLea
   );
 }
 
-function LeaderLists({ positive, negative, showExchange, limit, onOpen, sparks, split = false }: { positive: FundingLeader[]; negative: FundingLeader[]; showExchange: boolean; limit: number; onOpen: (symbol: string) => void; sparks: SparkMap; split?: boolean }) {
+function LeaderLists({ positive, negative, showExchange, limit, onOpen, sparks, split = false, side = "both" }: { positive: FundingLeader[]; negative: FundingLeader[]; showExchange: boolean; limit: number; onOpen: (symbol: string) => void; sparks: SparkMap; split?: boolean; side?: LeaderSide }) {
   return (
-    <div className={split ? "ld-split" : undefined}>
-      <div>
+    <div className={split && side === "both" ? "ld-split" : undefined}>
+      {side !== "negative" ? <div>
       <p className="t-subhead">Shorts get paid most</p>
       <ul className="t-list">
         {positive.slice(0, limit).map((leader) => (
           <LeaderRow key={`p-${leader.exchange}-${leader.exchange_symbol}`} leader={leader} showExchange={showExchange} onOpen={onOpen} spark={sparks[`${leader.canonical_symbol}|${leader.exchange}`]} />
         ))}
       </ul>
-      </div>
-      <div>
-      <p className="t-subhead" style={split ? undefined : { marginTop: 12 }}>
+      </div> : null}
+      {side !== "positive" ? <div>
+      <p className="t-subhead" style={split || side === "negative" ? undefined : { marginTop: 12 }}>
         Longs get paid most
       </p>
       <ul className="t-list">
@@ -57,7 +63,7 @@ function LeaderLists({ positive, negative, showExchange, limit, onOpen, sparks, 
           <LeaderRow key={`n-${leader.exchange}-${leader.exchange_symbol}`} leader={leader} showExchange={showExchange} onOpen={onOpen} spark={sparks[`${leader.canonical_symbol}|${leader.exchange}`]} />
         ))}
       </ul>
-      </div>
+      </div> : null}
     </div>
   );
 }
@@ -66,22 +72,63 @@ export function LeadersView({ leaders, onOpen, loading = false }: { leaders: Exc
   const [mode, setMode] = usePref<LeaderMode>("arbradar-leaders-mode", "market");
   const [limit, setLimit] = usePref<number>("arbradar-leaders-limit", 5);
   // Rates compare fairly only per hour, so the market-wide list ranks on that.
-  const market = useMemo(() => {
-    const everyone = leaders.flatMap((group) => [...group.top_positive, ...group.top_negative]);
-    const perHour = (leader: FundingLeader) => leader.funding_rate / Math.max(leader.funding_interval_hours ?? 8, 1);
-    return {
-      positive: everyone.filter((leader) => leader.funding_rate > 0).sort((a, b) => perHour(b) - perHour(a)),
-      negative: everyone.filter((leader) => leader.funding_rate < 0).sort((a, b) => perHour(a) - perHour(b)),
+  const [side, setSide] = usePref<LeaderSide>("arbradar-leaders-side", "both");
+  const [sort, setSort] = usePref<LeaderSort>("arbradar-leaders-sort", "rate");
+  const [advanced, setAdvanced] = useState(false);
+  const [search, setSearch] = useState("");
+  const [minApr, setMinApr] = useState("");
+  const [minOi, setMinOi] = useState("");
+  const [interval, setIntervalHours] = useState<number | "any">("any");
+  const [hidden, setHidden] = useState<string[]>([]);
+  const activeFilters = [search.trim(), minApr, minOi, interval !== "any", hidden.length].filter(Boolean).length;
+  const resetFilters = () => {
+    setSearch("");
+    setMinApr("");
+    setMinOi("");
+    setIntervalHours("any");
+    setHidden([]);
+  };
+
+  const filtered = useMemo(() => {
+    const query = search.trim().toUpperCase();
+    const aprFloor = Number(minApr) || 0;
+    const oiFloor = (Number(minOi) || 0) * 1_000_000;
+    const keep = (leader: FundingLeader) =>
+      !hidden.includes(leader.exchange) &&
+      (interval === "any" || (leader.funding_interval_hours ?? 8) === interval) &&
+      leaderApr(leader) >= aprFloor &&
+      (!oiFloor || (leader.open_interest_usd ?? 0) >= oiFloor) &&
+      (!query || leader.base_asset.toUpperCase().includes(query) || leader.canonical_symbol.toUpperCase().includes(query));
+    // Rates compare fairly only per hour, so every ranking uses the hourly figure.
+    const order = (positive: boolean) => (a: FundingLeader, b: FundingLeader) => {
+      if (sort === "oi") return (b.open_interest_usd ?? 0) - (a.open_interest_usd ?? 0);
+      return positive ? perHourRate(b) - perHourRate(a) : perHourRate(a) - perHourRate(b);
     };
-  }, [leaders]);
+    return leaders.map((group) => ({
+      ...group,
+      top_positive: group.top_positive.filter((leader) => leader.funding_rate > 0 && keep(leader)).sort(order(true)),
+      top_negative: group.top_negative.filter((leader) => leader.funding_rate < 0 && keep(leader)).sort(order(false)),
+    }));
+  }, [leaders, search, minApr, minOi, interval, hidden, sort]);
+
+  const market = useMemo(() => {
+    const everyone = filtered.flatMap((group) => [...group.top_positive, ...group.top_negative]);
+    const rank = (positive: boolean) => (a: FundingLeader, b: FundingLeader) =>
+      sort === "oi" ? (b.open_interest_usd ?? 0) - (a.open_interest_usd ?? 0) : positive ? perHourRate(b) - perHourRate(a) : perHourRate(a) - perHourRate(b);
+    return {
+      positive: everyone.filter((leader) => leader.funding_rate > 0).sort(rank(true)),
+      negative: everyone.filter((leader) => leader.funding_rate < 0).sort(rank(false)),
+    };
+  }, [filtered, sort]);
 
   const shown = useMemo(() => {
-    const picked = mode === "market" ? [...market.positive.slice(0, limit), ...market.negative.slice(0, limit)] : leaders.flatMap((group) => [...group.top_positive.slice(0, limit), ...group.top_negative.slice(0, limit)]);
+    const picked = mode === "market" ? [...market.positive.slice(0, limit), ...market.negative.slice(0, limit)] : filtered.flatMap((group) => [...group.top_positive.slice(0, limit), ...group.top_negative.slice(0, limit)]);
     return picked.map((leader) => leader.canonical_symbol);
-  }, [mode, limit, market, leaders]);
+  }, [mode, limit, market, filtered]);
   const trendExchanges = useMemo(() => leaders.map((group) => group.exchange), [leaders]);
   const intervals = useMemo(() => Object.fromEntries(leaders.flatMap((group) => [...group.top_positive, ...group.top_negative].slice(0, 1).map((leader) => [group.exchange, leader.funding_interval_hours ?? 8]))), [leaders]);
   const { series } = useFundingTrends(shown, trendExchanges, 60, 60_000);
+  const intervalOptions = useMemo(() => [...new Set(leaders.flatMap((group) => [...group.top_positive, ...group.top_negative].map((leader) => leader.funding_interval_hours ?? 8)))].sort((a, b) => a - b), [leaders]);
   const sparks = useMemo(() => rateSparks(series, intervals), [series, intervals]);
 
   if (loading && !leaders.length) return <SkeletonPanels count={3} />;
@@ -102,27 +149,94 @@ export function LeadersView({ leaders, onOpen, loading = false }: { leaders: Exc
         <label className="t-field" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           Show
           <select value={limit} onChange={(event) => setLimit(Number(event.target.value))}>
-            {[5, 10, 20].map((count) => (
+            {[5, 10, 20, 50].map((count) => (
               <option key={count} value={count}>
                 {count} each
               </option>
             ))}
           </select>
         </label>
+        <div className="t-segmented" role="group" aria-label="Direction">
+          <button type="button" aria-pressed={side === "both"} onClick={() => setSide("both")}>
+            Both
+          </button>
+          <button type="button" aria-pressed={side === "positive"} onClick={() => setSide("positive")} title="Funding above zero: shorts collect">
+            Top positive
+          </button>
+          <button type="button" aria-pressed={side === "negative"} onClick={() => setSide("negative")} title="Funding below zero: longs collect">
+            Top negative
+          </button>
+        </div>
+        <label className="t-field" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          Rank by
+          <select value={sort} onChange={(event) => setSort(event.target.value as LeaderSort)}>
+            <option value="rate">Funding rate</option>
+            <option value="oi">Open interest</option>
+          </select>
+        </label>
+        <button type="button" className="t-text-btn" aria-pressed={advanced} onClick={() => setAdvanced((value) => !value)}>
+          Advanced filters{activeFilters ? ` (${activeFilters})` : ""}
+        </button>
       </div>
+      {advanced ? (
+        <div className="t-toolbar" style={{ marginBottom: 12, alignItems: "flex-end" }}>
+          <label className="t-field">
+            Coin
+            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="BTC, SOL…" />
+          </label>
+          <label className="t-field">
+            Min APR %
+            <input type="number" min="0" inputMode="decimal" value={minApr} onChange={(event) => setMinApr(event.target.value)} placeholder="e.g. 30" style={{ width: 90 }} />
+          </label>
+          <label className="t-field">
+            Min open interest ($M)
+            <input type="number" min="0" inputMode="decimal" value={minOi} onChange={(event) => setMinOi(event.target.value)} placeholder="e.g. 5" style={{ width: 110 }} />
+          </label>
+          <label className="t-field">
+            Settles every
+            <select value={interval} onChange={(event) => setIntervalHours(event.target.value === "any" ? "any" : Number(event.target.value))}>
+              <option value="any">Any</option>
+              {intervalOptions.map((hours) => (
+                <option key={hours} value={hours}>
+                  {hours}h
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="t-scope" role="group" aria-label="Exchanges">
+            {leaders.map((group) => (
+              <button
+                key={group.exchange}
+                type="button"
+                className="t-chip"
+                style={exchangeVar(group.exchange)}
+                aria-pressed={!hidden.includes(group.exchange)}
+                onClick={() => setHidden((current) => (current.includes(group.exchange) ? current.filter((item) => item !== group.exchange) : [...current, group.exchange]))}
+              >
+                {EXCHANGE_SHORT[group.exchange] ?? group.exchange}
+              </button>
+            ))}
+          </div>
+          {activeFilters ? (
+            <button type="button" className="t-text-btn" onClick={resetFilters}>
+              Reset
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       {mode === "market" ? (
         <section className="t-panel">
           <h3>Highest funding rates across all exchanges</h3>
-          <LeaderLists positive={market.positive} negative={market.negative} showExchange limit={limit} onOpen={onOpen} sparks={sparks} split />
+          <LeaderLists positive={market.positive} negative={market.negative} showExchange limit={limit} onOpen={onOpen} sparks={sparks} split side={side} />
         </section>
       ) : (
         <div className="t-grid-leaders">
-          {leaders.map((group) => (
+          {filtered.map((group) => (
             <section key={group.exchange} className="t-panel" style={exchangeVar(group.exchange)}>
               <h3>
                 <ExchangeTag exchange={group.exchange} />
               </h3>
-              <LeaderLists positive={group.top_positive} negative={group.top_negative} showExchange={false} limit={limit} onOpen={onOpen} sparks={sparks} />
+              <LeaderLists positive={group.top_positive} negative={group.top_negative} showExchange={false} limit={limit} onOpen={onOpen} sparks={sparks} side={side} />
             </section>
           ))}
         </div>

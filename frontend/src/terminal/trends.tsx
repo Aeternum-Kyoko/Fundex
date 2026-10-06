@@ -143,7 +143,7 @@ export function TrendChart({ series, intervals = {}, height = 180 }: { series: F
 
 /** Self-contained block for the detail panel and compare page. */
 export function TrendBlock({ symbol, exchanges, intervals }: { symbol: string; exchanges: string[]; intervals?: Record<string, number> }) {
-  const { series, loading } = useFundingTrends([symbol], exchanges, 96);
+  const { series, loading } = useFundingTrends([symbol], exchanges, 1440);
   if (loading && !series.length) return <p className="t-muted">Loading rate history…</p>;
   return <TrendChart series={series} intervals={intervals} />;
 }
@@ -198,7 +198,7 @@ export function TrendsView({
   }, [leaders]);
 
   const [symbol, setSymbol] = useState<string>("");
-  const [windowKey, setWindowKey] = useState<(typeof WINDOWS)[number]["label"]>("3h");
+  const [windowKey, setWindowKey] = useState<(typeof WINDOWS)[number]["label"]>("24h");
   const chosen = symbol || coins[0] || "";
   const points = WINDOWS.find((item) => item.label === windowKey)?.points ?? 180;
   const { series, loading } = useFundingTrends(chosen ? [chosen] : [], exchanges, points);

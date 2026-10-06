@@ -72,7 +72,7 @@ class Settings(BaseSettings):
     telegram_night_summary_hour: int = 22
     telegram_night_summary_minute: int = 0
     retention_prune_interval_minutes: int = 5
-    funding_snapshot_retention_hours: int = 6
+    funding_snapshot_retention_hours: int = 24
     opportunity_history_retention_days: int = 1
     telegram_alert_state_retention_days: int = 30
     database_path: str = "data/arbradar.db"

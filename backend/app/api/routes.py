@@ -117,7 +117,7 @@ async def exchange_funding_trends(
 ) -> FundingTrendsResponse:
     symbol_list = [item.strip().upper() for item in symbols.split(",") if item.strip()]
     exchange_list = _resolved_exchanges(request, exchanges)
-    resolved_limit = max(2, min(limit, 32))
+    resolved_limit = max(2, min(limit, 1440))
     series = await request.app.state.history_store.get_funding_trends(symbol_list, exchange_list, resolved_limit)
     return FundingTrendsResponse(total_series=len(series), series=series)
 
