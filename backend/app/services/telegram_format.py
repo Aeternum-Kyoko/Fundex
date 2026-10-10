@@ -84,6 +84,21 @@ def hold_lines(opportunity: ArbitrageOpportunity, notional: float) -> list[str]:
     ]
 
 
+def alert_lines(opportunity: ArbitrageOpportunity, notional: float) -> list[str]:
+    """Compact, consistent live-funding alert details."""
+    break_even = opportunity.break_even_hours
+    break_even_text = "—" if break_even is None else f"{break_even:.0f}h" if break_even < 48 else f"{break_even / 24:.1f}d"
+    days = opportunity.holding_horizon_hours / 24
+    return [
+        f"<b>Long</b> {SHORT_NAMES.get(opportunity.long_leg.exchange)}  ·  <b>Short</b> {SHORT_NAMES.get(opportunity.short_leg.exchange)}",
+        f"Live spread <b>{signed_pct(opportunity.spread_rate * 100)}</b> / 8h",
+        f"Est. {days:g}d net <b>{signed_pct(opportunity.net_return_percent, 3)}</b>  ·  {usd(opportunity.net_return_percent / 100 * notional)} per ${notional:,.0f} leg",
+        f"Break-even {break_even_text}  ·  Slippage {opportunity.slippage_source}",
+        f"↳ Long {rate_with_interval(opportunity.long_leg.funding_rate, opportunity.long_leg.funding_interval_hours)}  ·  "
+        f"Short {rate_with_interval(opportunity.short_leg.funding_rate, opportunity.short_leg.funding_interval_hours)}",
+    ]
+
+
 def trust_line(opportunity: ArbitrageOpportunity, capture: bool = False) -> str:
     level = opportunity.capture.data_trust_level if capture and opportunity.capture else opportunity.trust_level
     hold_only = {"profit", "persistence", "first_payment"}

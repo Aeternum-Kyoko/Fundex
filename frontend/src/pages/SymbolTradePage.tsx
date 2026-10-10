@@ -830,7 +830,7 @@ export function SymbolTradePage({ canonicalSymbol }: { canonicalSymbol: string }
         </div>
         <div className="td-switches">
           <div className="t-segmented t-strategy" role="group" aria-label="Strategy">
-            <button type="button" aria-pressed={strategy === "capture"} onClick={() => setStrategy("capture")}>Next funding</button>
+            <button type="button" aria-pressed={strategy === "capture"} onClick={() => setStrategy("capture")}>Live funding</button>
             <button type="button" aria-pressed={strategy === "hold"} onClick={() => setStrategy("hold")}>Hold</button>
           </div>
           <div className="t-segmented" role="group" aria-label="Side">

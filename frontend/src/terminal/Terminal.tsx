@@ -376,7 +376,7 @@ export function Terminal() {
               <div className="t-toolbar">
                 <div className="t-segmented t-strategy" role="group" aria-label="Strategy">
                   <button type="button" aria-pressed={captureMode} onClick={() => setStrategy("capture")} title="Enter just before a settlement, collect it, exit right after">
-                    Next funding
+                    Live funding
                   </button>
                   <button type="button" aria-pressed={!captureMode} onClick={() => setStrategy("hold")} title={`Keep the hedge on for ${horizonLabel} and collect every settlement`}>
                     Hold {horizonLabel}

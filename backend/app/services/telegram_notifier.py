@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from html import escape
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -12,7 +13,7 @@ from httpx import AsyncClient
 from app.core.config import Settings
 from app.models.market import ArbitrageOpportunity, FundingSnapshot
 from app.services.history_store import HistoryStore
-from app.services.telegram_format import capture_lines, hold_lines, leg_line, trust_line, usd
+from app.services.telegram_format import alert_lines, capture_lines, hold_lines, leg_line, trust_line, usd
 from app.services.telegram_commands import (
     TelegramCommandService,
     earliest_funding_time,
@@ -263,24 +264,18 @@ class TelegramNotifier:
 
     async def send_demo_alert(self) -> dict[str, Any]:
         message = (
-            "<b>Alert Update</b>\n\n"
-            "<b>Entered alerts</b>\n\n"
-            "<b>1. SOL-USDT-PERP</b>\n"
-            "Symbol - SOL-USDT-PERP\n"
-            "Spread - 1.000%\n"
-            "Binance symbol - SOLUSDT\n"
-            "Delta Exchange India symbol - SOLUSD\n"
-            "Binance rate - 0.350%\n"
-            "Delta Exchange India rate - -0.650%\n"
-            "Buy / Long - Delta Exchange India\n"
-            "Sell / Short - Binance\n"
-            "Confidence - 91/100\n"
-            "Combined OI - $12,400,000\n"
-            "Data age - 11s\n"
-            "Funding expiry - 1h 30m\n\n"
-            "<b>Exited alerts</b>\n\n"
-            "<b>1. XRP-USDT-PERP</b>\n"
-            "Exit reason - spread below 0.50%"
+            "<b>◈ FUNDEX  |  ALERT UPDATE</b>\n\n"
+            "<b>NEW OPPORTUNITIES  ·  1</b>\n\n"
+            "<b>01  SOL</b>\n"
+            "<b>Long</b> Delta  ·  <b>Short</b> Binance\n"
+            "Live spread <b>+1.0000%</b> / 8h\n"
+            "Est. net <b>+0.820%</b>  ·  +$8.20 per $1,000 leg\n"
+            "Break-even 14h\n"
+            "↳ Long −0.6500% / 8h  ·  Short +0.3500% / 8h\n"
+            "Trust <b>HIGH</b>\n\n"
+            "<b>REMOVED  ·  1</b>\n\n"
+            "<b>01  XRP</b>\n"
+            "↳ Spread below alert threshold"
         )
         await self._send_text(message)
         return {
@@ -632,25 +627,25 @@ class TelegramNotifier:
         exited: list[tuple[str, str]],
     ) -> str:
         now = datetime.now(timezone.utc)
-        parts = ["<b>Alert Update</b>"]
+        local_now = now.astimezone(ZoneInfo(self.settings.telegram_daily_summary_timezone))
+        parts = ["<b>◈ FUNDEX  |  ALERT UPDATE</b>", local_now.strftime("%d %b · %H:%M %Z")]
 
         if entered:
-            parts.extend(["", "<b>Entered alerts</b>"])
+            parts.extend(["", f"<b>NEW OPPORTUNITIES  ·  {len(entered)}</b>"])
             for index, candidate in enumerate(entered, start=1):
                 opportunity = candidate.opportunity
                 notional = self.settings.liquidity_reference_notional_usd
-                parts.extend(["", f"<b>{index}. {opportunity.base_asset}</b>", *hold_lines(opportunity, notional)])
-                parts.extend([leg_line("Long", opportunity.long_leg), leg_line("Short", opportunity.short_leg)])
-                parts.append(trust_line(opportunity))
+                parts.extend(["", f"<b>{index:02d}  {escape(opportunity.base_asset)}</b>", *alert_lines(opportunity, notional)])
+                parts.append(f"Trust <b>{opportunity.trust_level.upper()}</b>")
 
         if exited:
-            parts.extend(["", "<b>Exited alerts</b>"])
+            parts.extend(["", f"<b>REMOVED  ·  {len(exited)}</b>"])
             for index, (canonical_symbol, reason) in enumerate(exited, start=1):
                 parts.extend(
                     [
                         "",
-                        f"<b>{index}. {canonical_symbol}</b>",
-                        f"Exit reason - {reason}",
+                        f"<b>{index:02d}  {escape(canonical_symbol.removesuffix('-USDT-PERP'))}</b>",
+                        f"↳ {escape(reason)}",
                     ]
                 )
 

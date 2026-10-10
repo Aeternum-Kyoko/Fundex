@@ -236,7 +236,7 @@ export function ComparePage({ canonicalSymbol }: { canonicalSymbol: string }) {
             What your capital does
             <span className="td-switches">
               <span className="t-segmented" role="group" aria-label="Strategy">
-                <button type="button" aria-pressed={planStrategy === "capture"} onClick={() => setPlanStrategy("capture")}>Next funding</button>
+                <button type="button" aria-pressed={planStrategy === "capture"} onClick={() => setPlanStrategy("capture")}>Live funding</button>
                 <button type="button" aria-pressed={planStrategy === "hold"} onClick={() => setPlanStrategy("hold")}>Hold</button>
               </span>
             </span>
